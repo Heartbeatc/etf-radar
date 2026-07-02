@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     web_password_hash: str = ""
     web_session_secret: str = ""
     web_session_ttl_seconds: int = Field(default=43_200, ge=900, le=604_800)
+
+    security_docs_enabled: bool = False
+    security_allowed_hosts: str = "*"
+    security_rate_limit_enabled: bool = True
+    security_login_rate_limit_per_minute: int = Field(default=5, ge=1, le=60)
+    security_api_rate_limit_per_minute: int = Field(default=180, ge=10, le=5_000)
+    security_rate_limit_window_seconds: int = Field(default=60, ge=10, le=600)
+    security_max_body_bytes: int = Field(default=262_144, ge=1_024, le=10_485_760)
+    security_enable_hsts: bool = False
+    security_csp: str = (
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
+        "img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+        "connect-src 'self'; form-action 'self'"
+    )
+
     poll_interval_seconds: int = Field(default=30, ge=10, le=300)
     api_polling_enabled: bool = True
     collector_refresh_history_on_start: bool = True
@@ -85,6 +100,10 @@ class Settings(BaseSettings):
     @property
     def benchmark_code_list(self) -> list[str]:
         return _csv(self.benchmark_codes)
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        return _csv(self.security_allowed_hosts) or ["*"]
 
     @property
     def exposed_codes(self) -> list[str]:

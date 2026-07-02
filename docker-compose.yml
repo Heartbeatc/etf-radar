@@ -2,6 +2,14 @@ x-app-base: &app-base
   build: .
   image: etf-radar-app:latest
   restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
   env_file:
     - .env
   volumes:
@@ -23,7 +31,7 @@ services:
     environment:
       API_POLLING_ENABLED: "false"
     ports:
-      - "8088:8088"
+      - "127.0.0.1:8088:8088"
 
   collector:
     <<: *app-base
@@ -39,6 +47,13 @@ services:
       context: ./frontend
     container_name: etf-radar-web
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,mode=755
+      - /var/run:size=8m,mode=755
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       etf-radar:
         condition: service_started

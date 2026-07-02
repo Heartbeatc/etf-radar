@@ -1137,6 +1137,94 @@ body {
   gap: 7px;
 }
 
+.python-quant-head {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px;
+  background: #f9fafb;
+  border: 1px solid var(--line);
+  border-left: 3px solid #2563eb;
+  border-radius: 6px;
+}
+
+.python-quant-head strong {
+  color: var(--text-main);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.python-quant-head .ant-typography {
+  line-height: 1.55;
+}
+
+.python-quant-stack {
+  display: grid;
+  gap: 7px;
+}
+
+.python-quant-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 60px;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.python-quant-row.state-blocked,
+.python-quant-row.state-missing_core,
+.python-quant-row.state-required_before_capital {
+  border-left-color: var(--sell);
+}
+
+.python-quant-row.state-prototype,
+.python-quant-row.state-research_only,
+.python-quant-row.state-guarded_partial {
+  border-left-color: var(--wait);
+}
+
+.python-quant-row.state-partial {
+  border-left-color: var(--hold);
+}
+
+.python-quant-row .ant-typography {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.python-quant-note {
+  margin-top: 4px;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.python-quant-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.python-quant-score span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.python-quant-score strong {
+  color: var(--text-main);
+  font-size: 20px;
+  line-height: 1;
+}
+
 .algorithm-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 56px;

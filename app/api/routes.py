@@ -21,6 +21,7 @@ from app.domain.models import (
     LatestResponse,
     MarketFlowResponse,
     PoolRecommendationResponse,
+    PythonQuantStackReport,
     QuantDecisionResponse,
     QuantAlgorithmReport,
     QuantFrameworkResponse,
@@ -41,6 +42,7 @@ from app.services.action_decision import build_action_decision_report
 from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
 from app.services.pool_recommendation import build_pool_recommendation_report
+from app.services.python_quant_stack import build_python_quant_stack_report
 from app.services.quant_decision import build_quant_decision_report
 from app.services.quant_framework import build_quant_framework_report
 from app.services.quant_algorithms import build_quant_algorithm_report
@@ -170,6 +172,17 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         validation_report = build_quant_validation_report(runtime.store)
         maturity_report = build_quant_maturity_report(market_flow_report, pool_report, framework_report, validation_report)
         return build_quant_algorithm_report(framework_report, validation_report, maturity_report)
+
+    @app.get("/api/v1/python-quant-stack", response_model=PythonQuantStackReport, dependencies=PROTECTED)
+    async def python_quant_stack() -> PythonQuantStackReport:
+        market_flow_report = await runtime.market_flow()
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
+        framework_report = build_quant_framework_report(settings, market_flow_report, pool_report, action_report, runtime.store.positions())
+        validation_report = build_quant_validation_report(runtime.store)
+        maturity_report = build_quant_maturity_report(market_flow_report, pool_report, framework_report, validation_report)
+        algorithm_report = build_quant_algorithm_report(framework_report, validation_report, maturity_report)
+        return build_python_quant_stack_report(framework_report, validation_report, maturity_report, algorithm_report)
 
     @app.get("/api/v1/quant-self-audit", response_model=QuantSelfAuditReport, dependencies=PROTECTED)
     async def quant_self_audit() -> QuantSelfAuditReport:

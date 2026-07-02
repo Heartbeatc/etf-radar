@@ -689,6 +689,41 @@ class QuantAlgorithmReport(BaseModel):
     assumptions: list[str]
 
 
+
+class PythonQuantReference(BaseModel):
+    key: str
+    label: str
+    role: str
+    source_url: str
+    patterns: list[str]
+    adoption_decision: str
+
+
+class PythonQuantCapability(BaseModel):
+    key: str
+    label: str
+    reference_stack: list[str]
+    current_state: str
+    score: int
+    adoption_state: str
+    implemented_evidence: list[str]
+    blockers: list[str]
+    next_actions: list[str]
+
+
+class PythonQuantStackReport(BaseModel):
+    generated_at: datetime
+    current_level: str
+    readiness_score: int
+    verdict: str
+    references: list[PythonQuantReference]
+    capabilities: list[PythonQuantCapability]
+    adoption_sequence: list[str]
+    source_refs: list[str]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class QuantAuditFinding(BaseModel):
     key: str
     label: str

@@ -16,6 +16,7 @@ function invalidateTradingQueries(queryClient: QueryClient, token: string) {
   queryClient.invalidateQueries({ queryKey: ['quant-framework', token] });
   queryClient.invalidateQueries({ queryKey: ['quant-maturity', token] });
   queryClient.invalidateQueries({ queryKey: ['quant-algorithms', token] });
+  queryClient.invalidateQueries({ queryKey: ['python-quant-stack', token] });
   queryClient.invalidateQueries({ queryKey: ['quant-self-audit', token] });
   queryClient.invalidateQueries({ queryKey: ['positions', token] });
   queryClient.invalidateQueries({ queryKey: ['health'] });
@@ -42,14 +43,15 @@ function App() {
   const quantMaturityQuery = useProtectedQuery(['quant-maturity', sessionToken], sessionToken, ({ signal }) => api.getQuantMaturity(sessionToken, signal), autoRefresh ? 60_000 : false);
   const quantAlgorithmsQuery = useProtectedQuery(['quant-algorithms', sessionToken], sessionToken, ({ signal }) => api.getQuantAlgorithms(sessionToken, signal), autoRefresh ? 60_000 : false);
   const quantSelfAuditQuery = useProtectedQuery(['quant-self-audit', sessionToken], sessionToken, ({ signal }) => api.getQuantSelfAudit(sessionToken, signal), autoRefresh ? 60_000 : false);
+  const pythonQuantStackQuery = useProtectedQuery(['python-quant-stack', sessionToken], sessionToken, ({ signal }) => api.getPythonQuantStack(sessionToken, signal), autoRefresh ? 60_000 : false);
   const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const integrationsQuery = useProtectedQuery(['integrations', sessionToken], sessionToken, ({ signal }) => api.getIntegrations(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiStatusQuery = useProtectedQuery(['ai-status', sessionToken], sessionToken, ({ signal }) => api.getAiStatus(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiSummariesQuery = useProtectedQuery(['ai-summaries', sessionToken], sessionToken, ({ signal }) => api.getAiSummaries(sessionToken, signal), autoRefresh ? 60_000 : false);
 
-  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, quantMaturityQuery.error, quantAlgorithmsQuery.error, quantSelfAuditQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, quantMaturityQuery.error, quantAlgorithmsQuery.error, quantSelfAuditQuery.error, pythonQuantStackQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, quantMaturityQuery, quantAlgorithmsQuery, quantSelfAuditQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, quantMaturityQuery, quantAlgorithmsQuery, quantSelfAuditQuery, pythonQuantStackQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [frameworkQuery, positionsQuery].some((query) => query.isLoading);
 
   const clearSession = (openLogin = true) => {
@@ -86,6 +88,7 @@ function App() {
       queryClient.invalidateQueries({ queryKey: ['quant-framework', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-maturity', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-algorithms', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['python-quant-stack', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-self-audit', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-validation', sessionToken] });
       message.success('量化链路已刷新');
@@ -205,6 +208,7 @@ function App() {
             quantMaturity={quantMaturityQuery.data}
             quantAlgorithms={quantAlgorithmsQuery.data}
             quantSelfAudit={quantSelfAuditQuery.data}
+            pythonQuantStack={pythonQuantStackQuery.data}
             positions={positionsQuery.data ?? []}
             integrations={integrationsQuery.data ?? []}
             aiStatus={aiStatusQuery.data}

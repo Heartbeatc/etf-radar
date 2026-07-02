@@ -18,6 +18,8 @@ import type {
   HealthResponse,
   IntegrationStatus,
   Position,
+  PythonQuantCapability,
+  PythonQuantStackReport,
   QuantAlgorithmCandidate,
   QuantAlgorithmReport,
   QuantAuditFinding,
@@ -89,6 +91,7 @@ interface QuantWorkbenchProps {
   quantMaturity?: QuantMaturityReport;
   quantAlgorithms?: QuantAlgorithmReport;
   quantSelfAudit?: QuantSelfAuditReport;
+  pythonQuantStack?: PythonQuantStackReport;
   positions: Position[];
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
@@ -171,6 +174,7 @@ export function QuantWorkbench(props: QuantWorkbenchProps) {
           <MaturityPanel report={props.quantMaturity} />
           <ProductionReadinessPanel report={props.quantMaturity} />
           <SelfAuditPanel report={props.quantSelfAudit} />
+          <PythonQuantStackPanel report={props.pythonQuantStack} />
           <AlgorithmResearchPanel report={props.quantAlgorithms} />
           <ModelPipelinePanel framework={props.framework} report={props.quantMaturity} />
           <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
@@ -372,6 +376,72 @@ function auditSeverityLabel(severity: string) {
 function auditSeverityColor(severity: string) {
   const colors: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold' };
   return colors[severity] ?? 'default';
+}
+
+function PythonQuantStackPanel({ report }: { report?: PythonQuantStackReport }) {
+  const weak = report?.capabilities.filter((item) => item.score < 65).slice(0, 4) ?? [];
+  const visible = weak.length ? weak : report?.capabilities.slice(0, 4) ?? [];
+  return (
+    <Panel title="Python量化体系" icon={<ApiOutlined />} meta={report?.current_level ?? '等待报告'}>
+      <div className="python-quant-head">
+        <strong>{report ? report.readiness_score.toFixed(0) : '-'}</strong>
+        <Text>{report?.verdict ?? '等待Python量化体系对照'}</Text>
+      </div>
+      <div className="python-quant-stack">
+        {visible.map((item) => <PythonQuantCapabilityRow key={item.key} item={item} />)}
+        {!visible.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无体系对照" />}
+      </div>
+      <div className="next-upgrades">
+        <Text className="metric-label">改造顺序</Text>
+        <TagList items={(report?.adoption_sequence ?? []).slice(0, 3)} color="blue" empty="暂无" />
+      </div>
+    </Panel>
+  );
+}
+
+function PythonQuantCapabilityRow({ item }: { item: PythonQuantCapability }) {
+  return (
+    <div className={`python-quant-row state-${item.adoption_state}`}>
+      <div>
+        <Space size={4} wrap>
+          <Text strong>{item.label}</Text>
+          <Tag color={pythonQuantStateColor(item.adoption_state)}>{pythonQuantStateLabel(item.adoption_state)}</Tag>
+        </Space>
+        <Text className="muted">{item.reference_stack.join(' / ')}</Text>
+        <Text className="python-quant-note">短板：{item.blockers[0] ?? item.current_state}</Text>
+      </div>
+      <div className="python-quant-score">
+        <span>成熟度</span>
+        <strong>{item.score.toFixed(0)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function pythonQuantStateLabel(state: string) {
+  const labels: Record<string, string> = {
+    research_only: '研究级',
+    missing_core: '缺核心',
+    prototype: '原型',
+    partial: '部分',
+    guarded_partial: '受限',
+    required_before_capital: '资金前必补',
+    blocked: '阻断'
+  };
+  return labels[state] ?? state;
+}
+
+function pythonQuantStateColor(state: string) {
+  const colors: Record<string, string> = {
+    research_only: 'orange',
+    missing_core: 'red',
+    prototype: 'orange',
+    partial: 'blue',
+    guarded_partial: 'gold',
+    required_before_capital: 'red',
+    blocked: 'red'
+  };
+  return colors[state] ?? 'default';
 }
 
 function AlgorithmResearchPanel({ report }: { report?: QuantAlgorithmReport }) {

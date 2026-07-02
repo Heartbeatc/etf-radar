@@ -759,3 +759,38 @@ export interface QuantSelfAuditReport {
   warnings: string[];
   assumptions: string[];
 }
+
+
+export interface PythonQuantReference {
+  key: string;
+  label: string;
+  role: string;
+  source_url: string;
+  patterns: string[];
+  adoption_decision: string;
+}
+
+export interface PythonQuantCapability {
+  key: string;
+  label: string;
+  reference_stack: string[];
+  current_state: string;
+  score: number;
+  adoption_state: string;
+  implemented_evidence: string[];
+  blockers: string[];
+  next_actions: string[];
+}
+
+export interface PythonQuantStackReport {
+  generated_at: string;
+  current_level: string;
+  readiness_score: number;
+  verdict: string;
+  references: PythonQuantReference[];
+  capabilities: PythonQuantCapability[];
+  adoption_sequence: string[];
+  source_refs: string[];
+  warnings: string[];
+  assumptions: string[];
+}

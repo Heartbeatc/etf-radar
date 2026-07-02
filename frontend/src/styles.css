@@ -171,8 +171,7 @@ body {
 .section-title-row,
 .trade-card-head,
 .panel-head,
-.row-card,
-.card-head {
+.row-card {
   display: flex;
   align-items: center;
   justify-content: space-between;

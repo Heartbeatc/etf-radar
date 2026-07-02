@@ -403,12 +403,23 @@ export interface QuantRiskAdjustment {
   risk_flags: string[];
 }
 
+export interface QuantExecutionCondition {
+  key: string;
+  label: string;
+  status: string;
+  value: string | null;
+  threshold: string | null;
+  reason: string;
+}
+
 export interface QuantExecutionAdvice {
   code: string;
   name: string;
   side: string;
   action: string;
   urgency: string;
+  decision_state: string;
+  decision_reason: string;
   current_price: number | null;
   action_score: number | null;
   low_buy_score: number | null;
@@ -421,6 +432,7 @@ export interface QuantExecutionAdvice {
   avoid_above: number | null;
   stop_price: number | null;
   take_profit_price: number | null;
+  conditions: QuantExecutionCondition[];
   notes: string[];
   blockers: string[];
 }
@@ -651,4 +663,23 @@ export interface WebSessionInfo {
   principal_type: string;
   username: string;
   expires_at: string | null;
+}
+
+export interface QuantMaturityModule {
+  key: string;
+  label: string;
+  status: string;
+  score: number;
+  evidence: string[];
+  gaps: string[];
+}
+
+export interface QuantMaturityReport {
+  generated_at: string;
+  grade: string;
+  score: number;
+  verdict: string;
+  modules: QuantMaturityModule[];
+  warnings: string[];
+  assumptions: string[];
 }

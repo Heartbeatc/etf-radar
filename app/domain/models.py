@@ -621,12 +621,42 @@ class QuantRiskAdjustment(BaseModel):
     risk_flags: list[str]
 
 
+class QuantExecutionCondition(BaseModel):
+    key: str
+    label: str
+    status: str
+    value: str | None = None
+    threshold: str | None = None
+    reason: str
+
+
+class QuantMaturityModule(BaseModel):
+    key: str
+    label: str
+    status: str
+    score: int
+    evidence: list[str]
+    gaps: list[str]
+
+
+class QuantMaturityReport(BaseModel):
+    generated_at: datetime
+    grade: str
+    score: int
+    verdict: str
+    modules: list[QuantMaturityModule]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class QuantExecutionAdvice(BaseModel):
     code: str
     name: str
     side: str
     action: str
     urgency: str
+    decision_state: str = "monitor"
+    decision_reason: str = "等待下一轮量化确认"
     current_price: float | None = None
     action_score: int | None = None
     low_buy_score: int | None = None
@@ -639,6 +669,7 @@ class QuantExecutionAdvice(BaseModel):
     avoid_above: float | None = None
     stop_price: float | None = None
     take_profit_price: float | None = None
+    conditions: list[QuantExecutionCondition] = Field(default_factory=list)
     notes: list[str]
     blockers: list[str]
 

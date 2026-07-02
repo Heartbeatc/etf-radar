@@ -404,7 +404,7 @@ function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; 
         <DecisionMetric label="止盈" value={formatPrice(item.take_profit_price)} />
         <DecisionMetric label="防守" value={formatPrice(item.stop_price)} />
       </div>
-      <p className={blocked ? 'trade-reason risk-text' : 'trade-reason'}>{executionShortText(item)}</p>
+      <p className={blocked ? 'trade-reason risk-text' : 'trade-reason'}>{item.decision_reason || executionShortText(item)}</p>
     </article>
   );
 }

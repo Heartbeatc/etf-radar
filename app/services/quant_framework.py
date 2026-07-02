@@ -14,6 +14,7 @@ from app.domain.models import (
     PoolRecommendationResponse,
     Position,
     QuantExecutionAdvice,
+    QuantExecutionCondition,
     QuantFeatureRow,
     QuantFrameworkResponse,
     QuantFrameworkValidation,
@@ -381,6 +382,7 @@ def _build_execution_plan(
         side = _execution_side(item, action)
         blockers = [] if not item.blocked else item.reasons
         notes = _execution_notes(item, action, pool_item)
+        decision_state, decision_reason, conditions = _execution_contract(item, action, side)
         plan.append(
             QuantExecutionAdvice(
                 code=item.code,
@@ -388,6 +390,8 @@ def _build_execution_plan(
                 side=side,
                 action=action.action if action else ("WATCH" if side == "WAIT" else side),
                 urgency=action.urgency if action else "normal",
+                decision_state=decision_state,
+                decision_reason=decision_reason,
                 current_price=action.current_price if action else None,
                 action_score=action.action_score if action else None,
                 low_buy_score=action.low_buy_score if action else None,
@@ -400,11 +404,104 @@ def _build_execution_plan(
                 avoid_above=action.avoid_above if action else None,
                 stop_price=action.effective_exit_price if action else None,
                 take_profit_price=action.first_take_profit_price if action else None,
+                conditions=conditions,
                 notes=notes[:6],
                 blockers=blockers[:6],
             )
         )
     return plan
+
+
+def _execution_contract(
+    item: QuantRiskAdjustment,
+    action: ActionDecisionItem | None,
+    side: str,
+) -> tuple[str, str, list[QuantExecutionCondition]]:
+    if not action:
+        return "monitor", "仅监控，尚未生成交易动作", []
+
+    conditions = [
+        _condition(
+            "data",
+            "数据有效",
+            action.action != "WAIT_DATA" and action.current_price is not None,
+            _fmt_price(action.current_price),
+            "有实时价格且数据未阻断",
+            "行情数据可用于计算" if action.current_price is not None else "缺少有效行情",
+        ),
+        _condition(
+            "price",
+            "价格在低吸区",
+            _price_in_zone(action),
+            _fmt_price(action.current_price),
+            _fmt_range(action.buy_zone_low, action.buy_zone_high),
+            "当前价处于低吸区" if _price_in_zone(action) else "价格未处于低吸区",
+        ),
+        _condition(
+            "low_buy_score",
+            "低吸质量分",
+            action.low_buy_score >= 70,
+            str(action.low_buy_score),
+            ">=70",
+            "低吸分达到首仓阈值" if action.low_buy_score >= 70 else "低吸分未达首仓阈值",
+        ),
+        _condition(
+            "risk_score",
+            "风险闸门",
+            action.risk_score < 75 and not item.blocked,
+            str(action.risk_score),
+            "<75且未阻断",
+            "风险允许进入执行层" if action.risk_score < 75 and not item.blocked else "风险或执行层阻断",
+        ),
+    ]
+
+    if item.blocked:
+        return "risk_blocked", item.reasons[0] if item.reasons else "风险模块阻断", conditions
+    if side == "SELL":
+        return "sell_ready", action.execution_note or "卖出/减仓条件触发", conditions
+    if side == "BUY":
+        return "buy_ready", "价格、低吸分、风险闸门均通过，允许首仓", conditions
+    if side == "HOLD":
+        return "hold", action.execution_note or "持仓继续跟踪", conditions
+    if action.action == "WAIT_DATA":
+        return "data_blocked", "等待行情数据恢复", conditions
+    if _price_in_zone(action) and action.low_buy_score < 70:
+        return "wait_confirmation", "价格已到低吸区，但低吸分未达70阈值", conditions
+    if not _price_in_zone(action) and action.low_buy_score >= 70:
+        return "wait_price", "低吸分达标，但价格未进入低吸区", conditions
+    if action.action == "AVOID":
+        return "avoid", action.execution_note or "不符合低吸和风控条件", conditions
+    return "wait", action.execution_note or "等待下一轮价格和分数同时满足", conditions
+
+
+def _condition(key: str, label: str, passed: bool, value: str | None, threshold: str | None, reason: str) -> QuantExecutionCondition:
+    return QuantExecutionCondition(
+        key=key,
+        label=label,
+        status="pass" if passed else "fail",
+        value=value,
+        threshold=threshold,
+        reason=reason,
+    )
+
+
+def _price_in_zone(action: ActionDecisionItem) -> bool:
+    return (
+        action.current_price is not None
+        and action.buy_zone_low is not None
+        and action.buy_zone_high is not None
+        and action.buy_zone_low <= action.current_price <= action.buy_zone_high
+    )
+
+
+def _fmt_price(value: float | None) -> str | None:
+    return None if value is None else f"{value:.4f}"
+
+
+def _fmt_range(low: float | None, high: float | None) -> str | None:
+    if low is None or high is None:
+        return None
+    return f"{low:.4f}-{high:.4f}"
 
 
 def _validation(
@@ -471,7 +568,7 @@ def _target_from_action(action: ActionDecisionItem, insight: QuantInsight | None
     if action.action == "BUY_FIRST_BATCH":
         target_weight = 20.0
         rebalance = "open_first_batch"
-    elif action.action in {"WAIT_BUY_ZONE", "WATCH_LOW_BUY", "WAIT_PULLBACK", "WAIT"}:
+    elif action.action in {"WAIT_BUY_ZONE", "WATCH_LOW_BUY", "WAIT_PULLBACK", "WAIT_CONFIRMATION", "WAIT"}:
         target_weight = 0.0
         rebalance = "wait_for_trigger"
     elif action.action == "SELL_ALL":

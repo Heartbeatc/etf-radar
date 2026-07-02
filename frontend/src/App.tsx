@@ -367,7 +367,7 @@ function Dashboard(props: DashboardProps) {
     {
       key: 'discovery',
       label: <span><LineChartOutlined /> ETF载体</span>,
-      children: <DiscoveryTab discovery={discovery} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      children: <DiscoveryTab discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
       key: 'signals',
@@ -414,7 +414,7 @@ function OverviewTab({ latest, discovery, marketFlow, risk, dataQuality, onForce
   return (
     <Space direction="vertical" size="large" className="wide-stack">
       <MarketFlowSummary marketFlow={marketFlow} compact />
-      <CandidateCards discovery={discovery} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} compact />
+      <CandidateCards discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} compact />
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={14}>
           <section className="panel">
@@ -572,7 +572,7 @@ function StrongStockCell({ direction }: { direction: MarketDirection }) {
 }
 
 function LinkedEtfsCell({ direction }: { direction: MarketDirection }) {
-  const items = direction.main_etfs?.length ? [...direction.main_etfs, ...(direction.backup_etf ? [direction.backup_etf] : [])] : direction.linked_etfs;
+  const items = getDirectionCarrierEtfs(direction);
   if (!items.length) {
     return <Text className="muted">-</Text>;
   }
@@ -624,18 +624,18 @@ function BoardTags({ direction }: { direction: MarketDirection }) {
   );
 }
 
-function DiscoveryTab({ discovery, onForceDiscovery, forcingDiscovery }: { discovery?: DiscoveryResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
+function DiscoveryTab({ discovery, marketFlow, onForceDiscovery, forcingDiscovery }: { discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
   const candidates = useMemo(() => getDiscoveryCandidates(discovery), [discovery]);
 
   return (
     <Space direction="vertical" size="large" className="wide-stack">
-      <CandidateCards discovery={discovery} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      <CandidateCards discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
       <section className="panel">
-        <SectionHeader icon={<ThunderboltOutlined />} title="方向排行" meta={discovery ? formatDateTime(discovery.generated_at) : '-'} />
+        <SectionHeader icon={<ThunderboltOutlined />} title="ETF方向库" meta={discovery ? formatDateTime(discovery.generated_at) : '-'} />
         <DirectionTable data={discovery?.directions ?? []} />
       </section>
       <section className="panel">
-        <SectionHeader icon={<BarChartOutlined />} title="候选ETF" meta={`${candidates.length} 个`} />
+        <SectionHeader icon={<BarChartOutlined />} title="全市场ETF候选库" meta={`${candidates.length} 个`} />
         <CandidateTable data={candidates} />
       </section>
     </Space>
@@ -745,8 +745,9 @@ function QualityTab({ dataQuality, integrations }: { dataQuality?: DataQualityRe
 
 function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integrations }: Pick<DashboardProps, 'latest' | 'discovery' | 'marketFlow' | 'risk' | 'dataQuality' | 'integrations'>) {
   const topDirection = marketFlow?.directions?.[0] ?? discovery?.directions?.[0];
-  const firstMain = discovery?.main_candidates?.[0];
-  const secondMain = discovery?.main_candidates?.[1];
+  const carrierSet = getCarrierCandidateSet(marketFlow, discovery);
+  const firstMain = carrierSet.candidates[0];
+  const secondMain = carrierSet.candidates[1];
   const integrationOk = integrations.filter((item) => item.ok).length;
   const qualityGate = getQualityGate(dataQuality);
 
@@ -760,13 +761,13 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
       </Col>
       <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
-          <Statistic title="候选一" value={firstMain?.code ?? latest?.top_low_buy ?? '-'} prefix={<LineChartOutlined />} valueStyle={{ fontSize: 20 }} />
+          <Statistic title="载体一" value={firstMain?.code ?? latest?.top_low_buy ?? '-'} prefix={<LineChartOutlined />} valueStyle={{ fontSize: 20 }} />
           {firstMain && <Text className="metric-foot">{firstMain.name}</Text>}
         </Card>
       </Col>
       <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
-          <Statistic title="候选二" value={secondMain?.code ?? latest?.top_hold ?? '-'} prefix={<BarChartOutlined />} valueStyle={{ fontSize: 20 }} />
+          <Statistic title="载体二" value={secondMain?.code ?? latest?.top_hold ?? '-'} prefix={<BarChartOutlined />} valueStyle={{ fontSize: 20 }} />
           {secondMain && <Text className="metric-foot">{secondMain.name}</Text>}
         </Card>
       </Col>
@@ -780,44 +781,64 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
   );
 }
 
-function CandidateCards({ discovery, onForceDiscovery, forcingDiscovery, compact = false }: { discovery?: DiscoveryResponse; onForceDiscovery: () => void; forcingDiscovery: boolean; compact?: boolean }) {
-  const candidates = getDiscoveryCandidates(discovery);
+function CandidateCards({ discovery, marketFlow, onForceDiscovery, forcingDiscovery, compact = false }: { discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean; compact?: boolean }) {
+  const carrierSet = getCarrierCandidateSet(marketFlow, discovery);
+  const candidates = carrierSet.candidates;
 
   return (
     <section className="panel">
       <SectionHeader
         icon={<ThunderboltOutlined />}
-        title="主线候选"
-        meta={discovery ? `${discovery.source} · ${formatDateTime(discovery.generated_at)}` : '-'}
-        extra={<Button icon={<ReloadOutlined />} onClick={onForceDiscovery} loading={forcingDiscovery}>强制刷新</Button>}
+        title="ETF载体候选"
+        meta={carrierCandidateMeta(carrierSet)}
+        extra={<Button icon={<ReloadOutlined />} onClick={onForceDiscovery} loading={forcingDiscovery}>刷新ETF库</Button>}
       />
+      {carrierSet.direction && (
+        <div className="carrier-context">
+          <Space size={[0, 4]} wrap>
+            <Tag color="blue">方向 {carrierSet.direction.direction_label}</Tag>
+            <MarketStateTag value={carrierSet.direction.state} />
+            <TradeActionTag value={carrierSet.direction.trade_action} />
+            <Tag>主线 {carrierSet.direction.mainline_probability}</Tag>
+            <Tag>低吸 {carrierSet.direction.low_buy_readiness_score}</Tag>
+          </Space>
+        </div>
+      )}
+      {carrierSet.source === 'discovery' && candidates.length > 0 && (
+        <div className="carrier-context">
+          <Tag color="orange">ETF库兜底</Tag>
+        </div>
+      )}
       {candidates.length ? (
         <div className={compact ? 'candidate-grid compact' : 'candidate-grid'}>
-          {candidates.map((candidate) => (
-            <article key={`${candidate.role}-${candidate.code}`} className="candidate-card">
-              <Space direction="vertical" size="small" className="card-stack">
-                <Space wrap>
-                  <Tag color={candidate.role === 'backup' ? 'gold' : 'blue'}>{roleLabel(candidate.role)}</Tag>
-                  <EntryBiasTag value={candidate.entry_bias} />
-                  {candidate.risk_flags.map((flag) => <Tag color="red" key={flag}>{flag}</Tag>)}
+          {candidates.map((candidate) => {
+            const score = carrierScore(candidate);
+            return (
+              <article key={`${candidate.role}-${candidate.code}`} className="candidate-card">
+                <Space direction="vertical" size="small" className="card-stack">
+                  <Space wrap>
+                    <Tag color={candidate.role === 'backup' ? 'gold' : 'blue'}>{roleLabel(candidate.role)}</Tag>
+                    <EntryBiasTag value={candidate.entry_bias} />
+                    {candidate.risk_flags.map((flag) => <Tag color="red" key={flag}>{flag}</Tag>)}
+                  </Space>
+                  <div>
+                    <div className="candidate-name">{candidate.name}</div>
+                    <Text className="muted">{candidate.code} · {candidate.direction_label}</Text>
+                  </div>
+                  <Progress percent={clamp(score)} size="small" strokeColor={scoreColor(score)} />
+                  <div className="candidate-metrics">
+                    <MetricLabel label="适配" value={<ScoreText value={score} />} />
+                    <MetricLabel label="成交" value={formatAmount(candidate.amount)} />
+                    <MetricLabel label="净流" value={<MoneyValue value={candidate.main_net_inflow} />} />
+                    <MetricLabel label="溢价" value={<PercentValue value={candidate.premium_pct} neutral />} />
+                  </div>
                 </Space>
-                <div>
-                  <div className="candidate-name">{candidate.name}</div>
-                  <Text className="muted">{candidate.code} · {candidate.direction_label}</Text>
-                </div>
-                <Progress percent={clamp(candidate.score)} size="small" strokeColor={scoreColor(candidate.score)} />
-                <div className="candidate-metrics">
-                  <MetricLabel label="涨跌" value={<PercentValue value={candidate.change_pct} />} />
-                  <MetricLabel label="成交" value={formatAmount(candidate.amount)} />
-                  <MetricLabel label="净流" value={<MoneyValue value={candidate.main_net_inflow} />} />
-                  <MetricLabel label="溢价" value={<PercentValue value={candidate.premium_pct} neutral />} />
-                </div>
-              </Space>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无候选" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无ETF载体" />
       )}
     </section>
   );
@@ -1695,6 +1716,71 @@ function MetricLabel({ label, value }: { label: string; value: ReactNode }) {
       <div className="metric-value">{value}</div>
     </div>
   );
+}
+
+type CarrierCandidateSource = 'market_flow' | 'discovery' | 'none';
+
+interface CarrierCandidateSet {
+  source: CarrierCandidateSource;
+  candidates: DiscoveryEtfCandidate[];
+  direction?: MarketDirection;
+  generatedAt?: string;
+}
+
+function getCarrierCandidateSet(marketFlow?: MarketFlowResponse, discovery?: DiscoveryResponse): CarrierCandidateSet {
+  const directions = marketFlow?.directions ?? [];
+  const primaryDirection = directions.find((direction) => getDirectionCarrierEtfs(direction).length > 0 && !isWeakCarrierDirection(direction))
+    ?? directions.find((direction) => getDirectionCarrierEtfs(direction).length > 0);
+  if (primaryDirection) {
+    return {
+      source: 'market_flow',
+      candidates: getDirectionCarrierEtfs(primaryDirection),
+      direction: primaryDirection,
+      generatedAt: marketFlow?.generated_at
+    };
+  }
+
+  const discoveryCandidates = getDiscoveryCandidates(discovery);
+  if (discoveryCandidates.length) {
+    return {
+      source: 'discovery',
+      candidates: discoveryCandidates,
+      generatedAt: discovery?.generated_at
+    };
+  }
+
+  return { source: 'none', candidates: [] };
+}
+
+function getDirectionCarrierEtfs(direction: MarketDirection): DiscoveryEtfCandidate[] {
+  const rawItems = direction.main_etfs?.length
+    ? [...direction.main_etfs, ...(direction.backup_etf ? [direction.backup_etf] : [])]
+    : direction.linked_etfs.slice(0, 3);
+  return rawItems.slice(0, 3).map((item, index) => ({
+    ...item,
+    role: index < 2 ? 'main' : 'backup',
+    rank: index + 1,
+    direction_key: direction.direction_key,
+    direction_label: direction.direction_label
+  }));
+}
+
+function carrierCandidateMeta(carrierSet: CarrierCandidateSet): string {
+  if (carrierSet.source === 'market_flow' && carrierSet.direction && carrierSet.generatedAt) {
+    return `${carrierSet.direction.direction_label} · ${marketStateLabel(carrierSet.direction.state)} · ${formatDateTime(carrierSet.generatedAt)}`;
+  }
+  if (carrierSet.source === 'discovery' && carrierSet.generatedAt) {
+    return `ETF库兜底 · ${formatDateTime(carrierSet.generatedAt)}`;
+  }
+  return '-';
+}
+
+function carrierScore(candidate: DiscoveryEtfCandidate): number {
+  return candidate.mapping_score ?? candidate.score;
+}
+
+function isWeakCarrierDirection(direction: MarketDirection): boolean {
+  return direction.state === 'weakening' || direction.state === 'weak_direction';
 }
 
 function getDiscoveryCandidates(discovery?: DiscoveryResponse): DiscoveryEtfCandidate[] {

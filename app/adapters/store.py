@@ -1,0 +1,398 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from threading import Lock
+from typing import Any
+
+from app.domain.models import AlertEvent, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, SignalRecord, SourceStatus, TradePlan
+
+
+class Store:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = Lock()
+        self._init()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init(self) -> None:
+        with self._connect() as conn:
+            conn.executescript(
+                """
+                create table if not exists schema_meta (
+                    key text primary key,
+                    value text not null
+                );
+
+                create table if not exists snapshots (
+                    id integer primary key autoincrement,
+                    code text not null,
+                    fetched_at text not null,
+                    payload text not null
+                );
+                create index if not exists idx_snapshots_code_time on snapshots(code, fetched_at desc);
+
+                create table if not exists latest_snapshots (
+                    code text primary key,
+                    fetched_at text not null,
+                    payload text not null
+                );
+
+                create table if not exists daily_bars (
+                    code text primary key,
+                    fetched_at text not null,
+                    payload text not null
+                );
+
+                create table if not exists minute_bars (
+                    code text primary key,
+                    fetched_at text not null,
+                    payload text not null
+                );
+
+                create table if not exists positions (
+                    code text primary key,
+                    entry_price real not null,
+                    shares real,
+                    note text not null default '',
+                    updated_at text not null
+                );
+
+                create table if not exists signal_history (
+                    id integer primary key autoincrement,
+                    code text not null,
+                    name text not null,
+                    role text not null,
+                    signal_at text not null,
+                    signal text not null,
+                    confidence text not null,
+                    direction_score integer not null,
+                    low_buy_score integer not null,
+                    hold_score integer not null,
+                    take_profit_score integer not null,
+                    risk_score integer not null,
+                    current_price real,
+                    data_state text not null,
+                    payload text not null
+                );
+                create index if not exists idx_signal_history_code_time on signal_history(code, signal_at desc);
+                create index if not exists idx_signal_history_signal_time on signal_history(signal, signal_at desc);
+
+                create table if not exists alert_events (
+                    id integer primary key autoincrement,
+                    code text not null,
+                    alert_at text not null,
+                    level text not null,
+                    event text not null,
+                    message text not null,
+                    delivered integer not null default 0,
+                    error text,
+                    payload text not null
+                );
+                create index if not exists idx_alert_events_code_time on alert_events(code, alert_at desc);
+                create index if not exists idx_alert_events_event_time on alert_events(event, alert_at desc);
+
+                create table if not exists source_status (
+                    code text primary key,
+                    checked_at text not null,
+                    ok integer not null,
+                    payload text not null
+                );
+                """
+            )
+            conn.execute(
+                "insert into schema_meta(key, value) values('schema_version', '2') on conflict(key) do update set value = excluded.value"
+            )
+
+    def save_snapshots(self, snapshots: list[EtfSnapshot]) -> None:
+        with self._lock, self._connect() as conn:
+            for snapshot in snapshots:
+                payload = snapshot.model_dump_json()
+                fetched_at = snapshot.fetched_at.isoformat()
+                conn.execute(
+                    "insert into snapshots(code, fetched_at, payload) values (?, ?, ?)",
+                    (snapshot.code, fetched_at, payload),
+                )
+                conn.execute(
+                    """
+                    insert into latest_snapshots(code, fetched_at, payload) values (?, ?, ?)
+                    on conflict(code) do update set fetched_at = excluded.fetched_at, payload = excluded.payload
+                    """,
+                    (snapshot.code, fetched_at, payload),
+                )
+            conn.execute(
+                "delete from snapshots where id not in (select id from snapshots order by fetched_at desc limit 20000)"
+            )
+
+    def save_latest_snapshots(self, snapshots: list[EtfSnapshot]) -> None:
+        with self._lock, self._connect() as conn:
+            for snapshot in snapshots:
+                conn.execute(
+                    """
+                    insert into latest_snapshots(code, fetched_at, payload) values (?, ?, ?)
+                    on conflict(code) do update set fetched_at = excluded.fetched_at, payload = excluded.payload
+                    """,
+                    (snapshot.code, snapshot.fetched_at.isoformat(), snapshot.model_dump_json()),
+                )
+
+    def latest_snapshots(self) -> dict[str, EtfSnapshot]:
+        with self._connect() as conn:
+            rows = conn.execute("select code, payload from latest_snapshots").fetchall()
+        return {row["code"]: EtfSnapshot.model_validate_json(row["payload"]) for row in rows}
+
+    def save_daily_bars(self, code: str, bars: list[DailyBar]) -> None:
+        self._save_bars("daily_bars", code, [bar.model_dump() for bar in bars])
+
+    def save_minute_bars(self, code: str, bars: list[MinuteBar]) -> None:
+        self._save_bars("minute_bars", code, [bar.model_dump() for bar in bars])
+
+    def get_daily_bars(self, code: str) -> list[DailyBar]:
+        return [DailyBar.model_validate(item) for item in self._get_bars("daily_bars", code)]
+
+    def get_minute_bars(self, code: str) -> list[MinuteBar]:
+        return [MinuteBar.model_validate(item) for item in self._get_bars("minute_bars", code)]
+
+    def _save_bars(self, table: str, code: str, payload: list[dict]) -> None:
+        fetched_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                f"""
+                insert into {table}(code, fetched_at, payload) values (?, ?, ?)
+                on conflict(code) do update set fetched_at = excluded.fetched_at, payload = excluded.payload
+                """,
+                (code, fetched_at, json.dumps(payload, ensure_ascii=False)),
+            )
+
+    def _get_bars(self, table: str, code: str) -> list[dict]:
+        with self._connect() as conn:
+            row = conn.execute(f"select payload from {table} where code = ?", (code,)).fetchone()
+        if not row:
+            return []
+        return json.loads(row["payload"])
+
+    def upsert_position(self, code: str, position: PositionInput) -> Position:
+        updated_at = datetime.now(timezone.utc)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into positions(code, entry_price, shares, note, updated_at) values (?, ?, ?, ?, ?)
+                on conflict(code) do update set
+                    entry_price = excluded.entry_price,
+                    shares = excluded.shares,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (code, position.entry_price, position.shares, position.note, updated_at.isoformat()),
+            )
+        return Position(code=code, updated_at=updated_at, **position.model_dump())
+
+    def delete_position(self, code: str) -> bool:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("delete from positions where code = ?", (code,))
+            return cursor.rowcount > 0
+
+    def positions(self) -> dict[str, Position]:
+        with self._connect() as conn:
+            rows = conn.execute("select * from positions").fetchall()
+        result: dict[str, Position] = {}
+        for row in rows:
+            result[row["code"]] = Position(
+                code=row["code"],
+                entry_price=row["entry_price"],
+                shares=row["shares"],
+                note=row["note"],
+                updated_at=datetime.fromisoformat(row["updated_at"]),
+            )
+        return result
+
+    def save_signal_history(self, plans: list[TradePlan]) -> None:
+        signal_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connect() as conn:
+            for plan in plans:
+                conn.execute(
+                    """
+                    insert into signal_history(
+                        code, name, role, signal_at, signal, confidence, direction_score, low_buy_score,
+                        hold_score, take_profit_score, risk_score, current_price, data_state, payload
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        plan.code,
+                        plan.name,
+                        plan.role,
+                        signal_at,
+                        plan.signal,
+                        plan.confidence,
+                        plan.direction_score,
+                        plan.low_buy_score,
+                        plan.hold_score,
+                        plan.take_profit_score,
+                        plan.risk_score,
+                        plan.current_price,
+                        plan.data_state,
+                        plan.model_dump_json(),
+                    ),
+                )
+            conn.execute(
+                "delete from signal_history where id not in (select id from signal_history order by signal_at desc limit 50000)"
+            )
+
+    def previous_signals(self, codes: list[str]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        with self._connect() as conn:
+            for code in codes:
+                row = conn.execute(
+                    "select signal from signal_history where code = ? order by signal_at desc limit 1",
+                    (code,),
+                ).fetchone()
+                if row:
+                    result[code] = row["signal"]
+        return result
+
+    def signal_history(self, code: str | None = None, limit: int = 200) -> list[SignalRecord]:
+        limit = max(1, min(limit, 1000))
+        params: tuple[Any, ...]
+        sql = "select * from signal_history"
+        if code:
+            sql += " where code = ?"
+            params = (code,)
+        else:
+            params = ()
+        sql += " order by signal_at desc limit ?"
+        params = (*params, limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_signal_record(row) for row in rows]
+
+    def save_source_status(self, statuses: list[SourceStatus]) -> None:
+        checked_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connect() as conn:
+            for status in statuses:
+                conn.execute(
+                    """
+                    insert into source_status(code, checked_at, ok, payload) values (?, ?, ?, ?)
+                    on conflict(code) do update set checked_at = excluded.checked_at, ok = excluded.ok, payload = excluded.payload
+                    """,
+                    (status.code, checked_at, int(status.ok), status.model_dump_json()),
+                )
+
+    def source_statuses(self) -> list[SourceStatus]:
+        with self._connect() as conn:
+            rows = conn.execute("select payload from source_status order by code").fetchall()
+        return [SourceStatus.model_validate_json(row["payload"]) for row in rows]
+
+    def recent_alert_exists(self, code: str, event: str, cooldown_seconds: int) -> bool:
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=cooldown_seconds)).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                "select 1 from alert_events where code = ? and event = ? and alert_at >= ? limit 1",
+                (code, event, cutoff),
+            ).fetchone()
+        return row is not None
+
+    def save_alert_event(
+        self,
+        code: str,
+        level: str,
+        event: str,
+        message: str,
+        payload: dict[str, Any],
+        delivered: bool = False,
+        error: str | None = None,
+    ) -> AlertEvent:
+        alert_at = datetime.now(timezone.utc)
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                insert into alert_events(code, alert_at, level, event, message, delivered, error, payload)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    alert_at.isoformat(),
+                    level,
+                    event,
+                    message,
+                    int(delivered),
+                    error,
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+            event_id = int(cursor.lastrowid)
+            conn.execute(
+                "delete from alert_events where id not in (select id from alert_events order by alert_at desc limit 5000)"
+            )
+        return AlertEvent(
+            id=event_id,
+            code=code,
+            alert_at=alert_at,
+            level=level,
+            event=event,
+            message=message,
+            delivered=delivered,
+            error=error,
+            payload=payload,
+        )
+
+    def mark_alert_delivery(self, event_id: int, delivered: bool, error: str | None = None) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "update alert_events set delivered = ?, error = ? where id = ?",
+                (int(delivered), error, event_id),
+            )
+
+    def alert_events(self, code: str | None = None, limit: int = 100) -> list[AlertEvent]:
+        limit = max(1, min(limit, 1000))
+        params: tuple[Any, ...]
+        sql = "select * from alert_events"
+        if code:
+            sql += " where code = ?"
+            params = (code,)
+        else:
+            params = ()
+        sql += " order by alert_at desc limit ?"
+        params = (*params, limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_alert_event(row) for row in rows]
+
+
+def _signal_record(row: sqlite3.Row) -> SignalRecord:
+    return SignalRecord(
+        id=row["id"],
+        code=row["code"],
+        name=row["name"],
+        role=row["role"],
+        signal_at=datetime.fromisoformat(row["signal_at"]),
+        signal=row["signal"],
+        confidence=row["confidence"],
+        direction_score=row["direction_score"],
+        low_buy_score=row["low_buy_score"],
+        hold_score=row["hold_score"],
+        take_profit_score=row["take_profit_score"],
+        risk_score=row["risk_score"],
+        current_price=row["current_price"],
+        data_state=row["data_state"],
+        payload=json.loads(row["payload"]),
+    )
+
+
+def _alert_event(row: sqlite3.Row) -> AlertEvent:
+    return AlertEvent(
+        id=row["id"],
+        code=row["code"],
+        alert_at=datetime.fromisoformat(row["alert_at"]),
+        level=row["level"],
+        event=row["event"],
+        message=row["message"],
+        delivered=bool(row["delivered"]),
+        error=row["error"],
+        payload=json.loads(row["payload"]),
+    )

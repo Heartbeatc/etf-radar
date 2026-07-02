@@ -1,0 +1,29 @@
+# Secrets and local runtime
+.env
+.env.*
+!.env.example
+data/
+*.sqlite
+*.sqlite3
+*.db
+web-login.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Frontend
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+
+# Logs and OS
+*.log
+.DS_Store

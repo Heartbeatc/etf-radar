@@ -1,0 +1,126 @@
+x-app-base: &app-base
+  build: .
+  image: etf-radar-app:latest
+  restart: unless-stopped
+  env_file:
+    - .env
+  volumes:
+    - ./data:/opt/etf-radar/data
+  depends_on:
+    redpanda:
+      condition: service_started
+    clickhouse:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  etf-radar:
+    <<: *app-base
+    container_name: etf-radar
+    environment:
+      API_POLLING_ENABLED: "false"
+    ports:
+      - "8088:8088"
+
+  collector:
+    <<: *app-base
+    container_name: etf-collector
+    command: ["python", "-m", "app.workers.collector"]
+
+  signal-worker:
+    <<: *app-base
+    command: ["python", "-m", "app.workers.signal_worker"]
+
+  web:
+    build:
+      context: ./frontend
+    container_name: etf-radar-web
+    restart: unless-stopped
+    depends_on:
+      etf-radar:
+        condition: service_started
+    ports:
+      - "8090:80"
+
+  postgres:
+    image: docker.1ms.run/postgres:16-alpine
+    container_name: etf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-etf_radar}
+      POSTGRES_USER: ${POSTGRES_USER:-etf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-etf} -d ${POSTGRES_DB:-etf_radar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: docker.1ms.run/redis:7-alpine
+    container_name: etf-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redpanda:
+    image: docker.1ms.run/redpandadata/redpanda:v24.2.15
+    container_name: etf-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  clickhouse:
+    image: docker.1ms.run/clickhouse/clickhouse-server:24.8
+    container_name: etf-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-etf_radar}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-etf}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  redpanda-data:
+  clickhouse-data:
+  postgres-data:
+  redis-data:

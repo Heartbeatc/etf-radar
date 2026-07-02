@@ -1,0 +1,283 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #f5f7fb;
+  color: #1f2937;
+  letter-spacing: 0;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: auto;
+  min-height: 64px;
+  padding: 10px 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  line-height: 1.2;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  gap: 10px;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: #ffffff;
+  background: #1677ff;
+  border-radius: 6px;
+}
+
+.brand-title {
+  margin: 0 !important;
+  line-height: 1.1 !important;
+}
+
+.brand-subtitle,
+.muted,
+.metric-foot,
+.metric-label {
+  color: #6b7280;
+}
+
+.top-actions {
+  justify-content: flex-end;
+}
+
+.content {
+  width: 100%;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 18px 24px 32px;
+}
+
+.boundary-alert,
+.stack-alert {
+  margin-bottom: 12px;
+}
+
+.empty-panel,
+.loading-box {
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-box {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.panel {
+  width: 100%;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.chart-panel {
+  min-height: 390px;
+}
+
+.wide-stack,
+.modal-body,
+.card-stack {
+  width: 100%;
+}
+
+.metric-row {
+  margin-bottom: 16px;
+}
+
+.metric-card {
+  height: 100%;
+  border-color: #e5e7eb;
+  box-shadow: none;
+}
+
+.metric-foot {
+  display: block;
+  margin-top: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.work-tabs .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-icon {
+  display: inline-flex;
+  color: #1677ff;
+}
+
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.candidate-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.candidate-card {
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.candidate-name {
+  min-height: 22px;
+  font-weight: 650;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.candidate-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric-label {
+  display: block;
+  font-size: 12px;
+}
+
+.metric-value {
+  min-height: 22px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.risk-row,
+.quality-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 36px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.risk-row:last-child,
+.quality-item:last-child {
+  border-bottom: 0;
+}
+
+.risk-name {
+  margin-left: 8px;
+  color: #6b7280;
+}
+
+.quality-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.num-up {
+  color: #dc2626;
+  font-weight: 650;
+}
+
+.num-down {
+  color: #16a34a;
+  font-weight: 650;
+}
+
+.ant-table-wrapper .ant-table-cell {
+  vertical-align: middle;
+}
+
+.ant-tag {
+  margin-inline-end: 4px;
+  border-radius: 4px;
+  white-space: normal;
+}
+
+@media (max-width: 1180px) {
+  .candidate-grid,
+  .candidate-grid.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    align-items: flex-start;
+    padding: 10px 14px;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .top-actions {
+    gap: 8px !important;
+  }
+
+  .content {
+    padding: 12px;
+  }
+
+  .candidate-grid,
+  .candidate-grid.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .section-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

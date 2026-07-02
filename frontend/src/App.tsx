@@ -38,9 +38,11 @@ import type {
   Position,
   PositionInput,
   QuantExecutionAdvice,
+  QuantExecutionCondition,
   QuantFeatureRow,
   QuantFrameworkResponse,
   QuantInsight,
+  QuantMaturityReport,
   QuantValidationReport,
   QuantPortfolioTarget,
   QuantRiskAdjustment,
@@ -53,6 +55,7 @@ const { Text, Title } = Typography;
 
 function invalidateTradingQueries(queryClient: QueryClient, token: string) {
   queryClient.invalidateQueries({ queryKey: ['quant-framework', token] });
+  queryClient.invalidateQueries({ queryKey: ['quant-maturity', token] });
   queryClient.invalidateQueries({ queryKey: ['positions', token] });
   queryClient.invalidateQueries({ queryKey: ['health'] });
 }
@@ -75,14 +78,15 @@ function App() {
   const sessionQuery = useProtectedQuery(['auth-session', sessionToken], sessionToken, ({ signal }) => api.getSession(sessionToken, signal), autoRefresh ? 60_000 : false);
   const frameworkQuery = useProtectedQuery(['quant-framework', sessionToken], sessionToken, ({ signal }) => api.getQuantFramework(sessionToken, signal), autoRefresh ? 30_000 : false);
   const quantValidationQuery = useProtectedQuery(['quant-validation', sessionToken], sessionToken, ({ signal }) => api.getQuantValidation(sessionToken, signal), autoRefresh ? 60_000 : false);
+  const quantMaturityQuery = useProtectedQuery(['quant-maturity', sessionToken], sessionToken, ({ signal }) => api.getQuantMaturity(sessionToken, signal), autoRefresh ? 60_000 : false);
   const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const integrationsQuery = useProtectedQuery(['integrations', sessionToken], sessionToken, ({ signal }) => api.getIntegrations(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiStatusQuery = useProtectedQuery(['ai-status', sessionToken], sessionToken, ({ signal }) => api.getAiStatus(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiSummariesQuery = useProtectedQuery(['ai-summaries', sessionToken], sessionToken, ({ signal }) => api.getAiSummaries(sessionToken, signal), autoRefresh ? 60_000 : false);
 
-  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, quantMaturityQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, quantMaturityQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [frameworkQuery, positionsQuery].some((query) => query.isLoading);
 
   const clearSession = (openLogin = true) => {
@@ -117,6 +121,8 @@ function App() {
     mutationFn: () => api.getMarketFlow(sessionToken, true),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quant-framework', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['quant-maturity', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['quant-validation', sessionToken] });
       message.success('量化链路已刷新');
     },
     onError: (error) => message.error(getErrorMessage(error))
@@ -231,6 +237,7 @@ function App() {
             session={sessionQuery.data}
             framework={frameworkQuery.data}
             quantValidation={quantValidationQuery.data}
+            quantMaturity={quantMaturityQuery.data}
             positions={positionsQuery.data ?? []}
             integrations={integrationsQuery.data ?? []}
             aiStatus={aiStatusQuery.data}
@@ -292,6 +299,7 @@ interface QuantConsoleProps {
   session?: WebSessionInfo;
   framework?: QuantFrameworkResponse;
   quantValidation?: QuantValidationReport;
+  quantMaturity?: QuantMaturityReport;
   positions: Position[];
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
@@ -319,11 +327,22 @@ function QuantConsole(props: QuantConsoleProps) {
   const selectedUniverse = (props.framework?.universe ?? []).filter((item) => item.selected);
   const heldCodes = new Set(props.positions.map((item) => item.code));
   const positionActions = (props.framework?.final_actions ?? []).filter((item) => item.has_position || heldCodes.has(item.code));
+
   return (
-    <main className="trading-console">
-      <section className={`decision-hero side-${primary.side.toLowerCase()}`}>
+    <main className="quant-terminal">
+      <QuantCommandBar
+        health={props.health}
+        framework={props.framework}
+        quantValidation={props.quantValidation}
+        quantMaturity={props.quantMaturity}
+        errorMessage={props.errorMessage}
+        refreshing={props.refreshingFramework}
+        onRefresh={props.onRefreshFramework}
+      />
+
+      <section className={`quant-decision-strip side-${primary.side.toLowerCase()}`}>
         <div className="decision-copy">
-          <Text className="eyebrow">当前动作</Text>
+          <Text className="eyebrow">Decision Engine</Text>
           <h1>{frameworkConclusion(props.framework, primary)}</h1>
           <div className="status-line">
             <ActionTag action={primary.action} side={primary.side} />
@@ -332,29 +351,41 @@ function QuantConsole(props: QuantConsoleProps) {
             <Text className="muted">{frameworkStageLabel(props.framework)} · {formatDateTime(props.framework?.generated_at)}</Text>
           </div>
         </div>
-        <div className="decision-ticket">
-          <Text className="ticket-label">核心标的</Text>
+        <div className="decision-ticket quant-ticket">
+          <Text className="ticket-label">执行焦点</Text>
           <strong>{primary.code ?? '-'}</strong>
           <Text>{primary.note}</Text>
         </div>
       </section>
 
-      <section className="focus-board">
-        <div className="section-title-row">
-          <div>
-            <Text className="eyebrow">交易候选</Text>
-            <h2>今天只看这 3 个</h2>
-          </div>
-          <Button size="small" icon={<ReloadOutlined />} loading={props.refreshingFramework} onClick={props.onRefreshFramework}>刷新</Button>
+      <section className="quant-workbench">
+        <div className="execution-stack">
+          <section className="panel execution-panel">
+            <div className="section-title-row">
+              <div>
+                <Text className="eyebrow">Execution Contract</Text>
+                <h2>2 主 ETF + 1 备选，只在契约通过时行动</h2>
+              </div>
+              <Button size="small" icon={<ReloadOutlined />} loading={props.refreshingFramework} onClick={props.onRefreshFramework}>刷新链路</Button>
+            </div>
+            <div className="trade-grid quant-trade-grid">
+              {focusItems.map((item, index) => <TradeFocusCard key={item.code} item={item} index={index} primary={item.code === primary.code} />)}
+              {!focusItems.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无交易候选" />}
+            </div>
+            <SignalValidationStrip report={props.quantValidation} />
+          </section>
+
+          <PortfolioRiskPanel targets={props.framework?.portfolio_targets ?? []} risks={props.framework?.risk_adjustments ?? []} />
         </div>
-        <div className="trade-grid">
-          {focusItems.map((item, index) => <TradeFocusCard key={item.code} item={item} index={index} primary={item.code === primary.code} />)}
-          {!focusItems.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无交易候选" />}
+
+        <div className="model-stack">
+          <MaturityPanel report={props.quantMaturity} />
+          <ModelPipelinePanel framework={props.framework} report={props.quantMaturity} />
+          <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
         </div>
-        <SignalValidationStrip report={props.quantValidation} />
       </section>
 
-      <section className="support-grid">
+      <section className="operator-grid">
         <PositionPanel
           positions={props.positions}
           actions={positionActions}
@@ -366,14 +397,12 @@ function QuantConsole(props: QuantConsoleProps) {
           deleting={props.deletingPosition}
           deletingCode={props.deletingCode}
         />
-        <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
+        <EvidencePanel features={props.framework?.features ?? []} insights={props.framework?.insights ?? []} />
       </section>
 
-      <details className="detail-drawer">
-        <summary>展开证据、资产池和系统状态</summary>
+      <details className="detail-drawer audit-drawer">
+        <summary>审计区：资产池、验证样本、系统状态</summary>
         <div className="detail-grid">
-          <EvidencePanel features={props.framework?.features ?? []} insights={props.framework?.insights ?? []} />
-          <PortfolioRiskPanel targets={props.framework?.portfolio_targets ?? []} risks={props.framework?.risk_adjustments ?? []} />
           <UniversePanel items={selectedUniverse} allItems={props.framework?.universe ?? []} />
           <ValidationPanel framework={props.framework} onRefresh={props.onRefreshFramework} loading={props.refreshingFramework} />
           <SystemPanel health={props.health} session={props.session} framework={props.framework} integrations={props.integrations} />
@@ -386,26 +415,117 @@ function QuantConsole(props: QuantConsoleProps) {
 function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; index: number; primary: boolean }) {
   const role = index === 0 ? '主 ETF 1' : index === 1 ? '主 ETF 2' : '备选 ETF';
   const blocked = item.blockers.length > 0;
+  const inZone = isPriceInLowBuyZone(item);
   return (
     <article className={`trade-card side-${item.side.toLowerCase()} ${primary ? 'primary' : ''}`}>
       <div className="trade-card-head">
         <Text className="ticket-label">{role}</Text>
-        <ActionTag action={item.action} side={item.side} />
+        <Space size={4} wrap>
+          {primary && <Tag color="blue">焦点</Tag>}
+          <ActionTag action={item.action} side={item.side} />
+        </Space>
       </div>
       <div className="trade-identity">
         <strong>{item.name}</strong>
-        <Text className="muted">{item.code} · {etfRegionLabel(item.name)}</Text>
+        <Text className="muted">{item.code} · {etfRegionLabel(item.name)} · {decisionStateLabel(item.decision_state)}</Text>
       </div>
       <div className="trade-metrics">
         <DecisionMetric label="当前价" value={formatPrice(item.current_price)} />
         <DecisionMetric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
         <DecisionMetric label="低吸分" value={lowBuyScoreText(item.low_buy_score)} />
+        <DecisionMetric label="风险分" value={formatScore(item.risk_score)} />
         <DecisionMetric label="目标仓位" value={formatPercentNumber(item.target_weight_pct)} />
-        <DecisionMetric label="止盈" value={formatPrice(item.take_profit_price)} />
-        <DecisionMetric label="防守" value={formatPrice(item.stop_price)} />
+        <DecisionMetric label="止盈/防守" value={`${formatPrice(item.take_profit_price)} / ${formatPrice(item.stop_price)}`} />
       </div>
+      <ExecutionGateStrip conditions={item.conditions} inZone={inZone} />
       <p className={blocked ? 'trade-reason risk-text' : 'trade-reason'}>{item.decision_reason || executionShortText(item)}</p>
     </article>
+  );
+}
+
+function QuantCommandBar({ health, framework, quantValidation, quantMaturity, errorMessage, refreshing, onRefresh }: { health?: HealthResponse; framework?: QuantFrameworkResponse; quantValidation?: QuantValidationReport; quantMaturity?: QuantMaturityReport; errorMessage: string | null; refreshing: boolean; onRefresh: () => void }) {
+  return (
+    <section className="quant-command">
+      <CommandCell label="系统等级" value={quantMaturity ? `${quantMaturity.score.toFixed(0)}/100` : '-'} meta={maturityGradeLabel(quantMaturity?.grade)} tone={quantMaturity && quantMaturity.score >= 70 ? 'good' : 'warn'} />
+      <CommandCell label="市场状态" value={marketStatusLabel(framework?.market_status)} meta={formatDateTime(framework?.generated_at)} />
+      <CommandCell label="证据强度" value={evidenceLabel(framework?.validation.evidence_strength)} meta={framework?.validation.live_trading_ready ? 'live ready' : 'research'} tone={framework?.validation.live_trading_ready ? 'good' : 'warn'} />
+      <CommandCell label="验证样本" value={quantValidation ? quantValidation.actionable_records.toFixed(0) : '-'} meta={quantValidation ? `${quantValidation.total_records.toFixed(0)} records` : '-'} />
+      <CommandCell label="服务" value={health?.ok ? 'online' : 'check'} meta={health?.last_error || errorMessage || 'normal'} tone={health?.ok && !errorMessage ? 'good' : 'bad'} />
+      <Button icon={<ReloadOutlined />} loading={refreshing} onClick={onRefresh}>刷新</Button>
+    </section>
+  );
+}
+
+function CommandCell({ label, value, meta, tone = 'neutral' }: { label: string; value: ReactNode; meta?: ReactNode; tone?: 'good' | 'warn' | 'bad' | 'neutral' }) {
+  return (
+    <div className={`command-cell tone-${tone}`}>
+      <Text className="metric-label">{label}</Text>
+      <strong>{value}</strong>
+      {meta && <Text className="muted">{meta}</Text>}
+    </div>
+  );
+}
+
+function MaturityPanel({ report }: { report?: QuantMaturityReport }) {
+  const modules = report?.modules ?? [];
+  return (
+    <Panel title="模型成熟度" icon={<SafetyCertificateOutlined />} meta={maturityGradeLabel(report?.grade)}>
+      <div className="maturity-head">
+        <strong>{report ? report.score.toFixed(0) : '-'}</strong>
+        <Text>{report?.verdict ?? '等待成熟度报告'}</Text>
+      </div>
+      <div className="maturity-modules">
+        {modules.map((item) => (
+          <div className={`maturity-module status-${maturityStatusClass(item.status)}`} key={item.key}>
+            <Text className="metric-label">{item.label}</Text>
+            <strong>{item.score.toFixed(0)}</strong>
+            <Text className="muted">{maturityStatusLabel(item.status)}</Text>
+          </div>
+        ))}
+        {!modules.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成熟度模块" />}
+      </div>
+    </Panel>
+  );
+}
+
+function ModelPipelinePanel({ framework, report }: { framework?: QuantFrameworkResponse; report?: QuantMaturityReport }) {
+  const moduleScore = (key: string) => report?.modules.find((item) => item.key === key)?.score ?? null;
+  const steps = [
+    { key: 'universe', label: 'Universe', name: '资产池筛选', metric: `${framework?.universe.length ?? 0} assets`, score: moduleScore('data') },
+    { key: 'alpha', label: 'Alpha', name: '方向与强度信号', metric: `${framework?.insights.length ?? 0} insights`, score: moduleScore('research') },
+    { key: 'portfolio', label: 'Portfolio', name: '仓位目标', metric: `${framework?.portfolio_targets.length ?? 0} targets`, score: moduleScore('portfolio_risk') },
+    { key: 'risk', label: 'Risk', name: '风控覆盖', metric: `${framework?.risk_adjustments.length ?? 0} checks`, score: moduleScore('portfolio_risk') },
+    { key: 'execution', label: 'Execution', name: '低吸高抛契约', metric: `${framework?.execution_plan.length ?? 0} orders`, score: moduleScore('execution') },
+    { key: 'validation', label: 'Validation', name: '回测/前向验证', metric: framework?.validation.research_grade ? 'research grade' : 'pending', score: moduleScore('backtest') }
+  ];
+  return (
+    <Panel title="量化流水线" icon={<LineChartOutlined />} meta="Universe → Alpha → Portfolio → Risk → Execution">
+      <div className="pipeline-rail">
+        {steps.map((step) => (
+          <div className="pipeline-node" key={step.key}>
+            <div>
+              <Text className="metric-label">{step.label}</Text>
+              <Text strong>{step.name}</Text>
+              <Text className="muted">{step.metric}</Text>
+            </div>
+            <ScoreText value={step.score} />
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function ExecutionGateStrip({ conditions, inZone }: { conditions: QuantExecutionCondition[]; inZone: boolean }) {
+  const visible = conditions.length ? conditions : [{ key: 'price', label: '价格区间', status: inZone ? 'pass' : 'wait', value: null, threshold: null, reason: inZone ? '价格已进入低吸区' : '等待价格进入低吸区' }];
+  return (
+    <div className="condition-strip">
+      {visible.map((item) => (
+        <Tooltip key={item.key} title={`${item.reason}${item.value ? ` · 当前 ${item.value}` : ''}${item.threshold ? ` · 阈值 ${item.threshold}` : ''}`}>
+          <span className={`condition-pill status-${conditionStatusClass(item.status)}`}>{conditionStatusLabel(item.status)} {item.label}</span>
+        </Tooltip>
+      ))}
+    </div>
   );
 }
 
@@ -674,6 +794,91 @@ function lowBuyScoreText(value: number | null | undefined): string {
   return value == null ? '-' : `${value.toFixed(0)}/70`;
 }
 
+function formatScore(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(value) ? '-' : value.toFixed(0);
+}
+
+function decisionStateLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    ready: '契约通过',
+    wait_confirmation: '等待确认',
+    wait_price: '等待价格',
+    blocked: '风控阻断',
+    hold: '持仓跟踪',
+    avoid: '回避'
+  };
+  return value ? map[value] ?? value : '-';
+}
+
+function marketStatusLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    trading: '交易中',
+    closed: '已收盘',
+    pre_market: '盘前',
+    midday_break: '午间休市',
+    unknown: '未知'
+  };
+  return value ? map[value] ?? value : '-';
+}
+
+function maturityGradeLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    prototype: '原型',
+    research_quant: '研究级量化',
+    production_candidate: '生产候选',
+    production_quant: '生产级量化'
+  };
+  return value ? map[value] ?? value : '-';
+}
+
+function maturityStatusClass(value: string | null | undefined): string {
+  const normalized = normalizeStatus(value);
+  if (['strong', 'usable', 'ready', 'pass'].includes(normalized)) return 'pass';
+  if (['research-grade', 'research', 'medium', 'partial'].includes(normalized)) return 'warn';
+  if (['prototype', 'weak', 'gap', 'fail', 'blocked'].includes(normalized)) return 'fail';
+  return 'wait';
+}
+
+function maturityStatusLabel(value: string | null | undefined): string {
+  const normalized = normalizeStatus(value);
+  const map: Record<string, string> = {
+    strong: '强',
+    usable: '可用',
+    ready: '就绪',
+    pass: '通过',
+    'research-grade': '研究级',
+    research: '研究',
+    medium: '中等',
+    partial: '部分',
+    prototype: '原型',
+    weak: '弱',
+    gap: '缺口',
+    fail: '失败',
+    blocked: '阻断'
+  };
+  return map[normalized] ?? (value || '-');
+}
+
+function conditionStatusClass(value: string | null | undefined): string {
+  const normalized = normalizeStatus(value);
+  if (['pass', 'passed', 'ok', 'true'].includes(normalized)) return 'pass';
+  if (['fail', 'failed', 'blocked', 'false'].includes(normalized)) return 'fail';
+  if (['warn', 'warning', 'partial'].includes(normalized)) return 'warn';
+  return 'wait';
+}
+
+function conditionStatusLabel(value: string | null | undefined): string {
+  const normalized = normalizeStatus(value);
+  if (['pass', 'passed', 'ok', 'true'].includes(normalized)) return 'PASS';
+  if (['fail', 'failed', 'blocked', 'false'].includes(normalized)) return 'FAIL';
+  if (['warn', 'warning', 'partial'].includes(normalized)) return 'WARN';
+  return 'WAIT';
+}
+
+function normalizeStatus(value: string | null | undefined): string {
+  return (value ?? '').trim().toLowerCase().replace(/_/g, '-');
+}
+
 function etfRegionLabel(name: string): string {
   return /港股|港股通|恒生|中概|H股|香港/.test(name) ? '港股载体' : 'A股载体';
 }
@@ -709,7 +914,7 @@ function pickPrimaryExecution(framework?: QuantFrameworkResponse, positions: Pos
       code: priority.code,
       action: priority.action,
       side: priority.side,
-      note: priority.blockers[0] ?? priority.notes[0] ?? executionShortText(priority)
+      note: priority.blockers[0] ?? priority.decision_reason ?? priority.notes[0] ?? executionShortText(priority)
     };
   }
   return { code: null, action: 'WAIT', side: 'WAIT', note: positions.length ? '等待持仓风控信号。' : '空仓等待低吸触发。' };
@@ -725,13 +930,11 @@ function frameworkStageLabel(framework?: QuantFrameworkResponse): string {
 
 function frameworkConclusion(framework: QuantFrameworkResponse | undefined, primary: ReturnType<typeof pickPrimaryExecution>): string {
   if (!framework) return '暂无量化链路，先不做交易动作';
-  if (!framework.validation.live_trading_ready) {
-    if (primary.side === 'SELL') return `研究级信号触发风控优先：${primary.note}`;
-    if (primary.side === 'BUY') return `研究级信号出现买入触发：${primary.note}`;
-    if (primary.side === 'HOLD') return `研究级信号建议持有跟踪：${primary.note}`;
-    return `当前无买入触发，系统保持等待：${primary.note}`;
-  }
-  return primary.note;
+  if (primary.side === 'SELL') return `风控/止盈优先：${primary.note}`;
+  if (primary.side === 'BUY') return `执行契约通过：${primary.code} 可按计划低吸`;
+  if (primary.action === 'WAIT_CONFIRMATION') return `价格到位但契约未满：${primary.note}`;
+  if (primary.side === 'HOLD') return `持仓跟踪：${primary.note}`;
+  return `当前不交易：${primary.note}`;
 }
 
 function executionRank(item: QuantExecutionAdvice): number {

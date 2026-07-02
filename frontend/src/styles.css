@@ -627,3 +627,307 @@ body {
     flex-direction: column;
   }
 }
+
+.quant-content {
+  max-width: 1440px;
+}
+
+.quant-terminal {
+  display: grid;
+  gap: 12px;
+}
+
+.quant-command {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+}
+
+.command-cell {
+  min-width: 0;
+  padding: 9px 10px;
+  background: #18202c;
+  border: 1px solid #273142;
+  border-left: 3px solid #4b5563;
+  border-radius: 6px;
+}
+
+.command-cell.tone-good {
+  border-left-color: var(--buy);
+}
+
+.command-cell.tone-warn {
+  border-left-color: var(--wait);
+}
+
+.command-cell.tone-bad {
+  border-left-color: var(--sell);
+}
+
+.command-cell strong,
+.command-cell .ant-typography {
+  display: block;
+}
+
+.command-cell strong {
+  margin: 2px 0 1px;
+  color: #f9fafb;
+  font-size: 18px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.command-cell .metric-label {
+  color: #9ca3af;
+}
+
+.command-cell .muted {
+  color: #d1d5db;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quant-command .ant-btn {
+  align-self: center;
+  height: 100%;
+  min-height: 46px;
+}
+
+.quant-decision-strip {
+  --signal: var(--wait);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 300px);
+  gap: 14px;
+  align-items: stretch;
+  min-width: 0;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--signal);
+  border-radius: 8px;
+}
+
+.quant-decision-strip.side-buy {
+  --signal: var(--buy);
+}
+
+.quant-decision-strip.side-sell,
+.quant-decision-strip.side-avoid {
+  --signal: var(--sell);
+}
+
+.quant-decision-strip.side-hold {
+  --signal: var(--hold);
+}
+
+.quant-ticket {
+  background: #f9fafb;
+}
+
+.quant-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(340px, 0.92fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.execution-stack,
+.model-stack,
+.operator-grid {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.operator-grid {
+  grid-template-columns: minmax(320px, 0.82fr) minmax(0, 1.18fr);
+}
+
+.execution-panel {
+  padding: 14px;
+}
+
+.quant-trade-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trade-card {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.trade-identity {
+  margin: 0;
+}
+
+.trade-metrics {
+  gap: 6px;
+}
+
+.decision-metric {
+  min-height: 58px;
+}
+
+.condition-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 24px;
+}
+
+.condition-pill {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 3px 6px;
+  color: #475467;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.condition-pill.status-pass {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.condition-pill.status-warn,
+.condition-pill.status-wait {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.condition-pill.status-fail {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.maturity-head {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.maturity-head strong {
+  color: var(--text-main);
+  font-size: 36px;
+  line-height: 1;
+}
+
+.maturity-head .ant-typography {
+  line-height: 1.55;
+}
+
+.maturity-modules {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.maturity-module {
+  min-width: 0;
+  padding: 8px;
+  background: #f9fafb;
+  border: 1px solid var(--line);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.maturity-module.status-pass {
+  border-left-color: var(--buy);
+}
+
+.maturity-module.status-warn,
+.maturity-module.status-wait {
+  border-left-color: var(--wait);
+}
+
+.maturity-module.status-fail {
+  border-left-color: var(--sell);
+}
+
+.maturity-module strong,
+.maturity-module .ant-typography {
+  display: block;
+}
+
+.maturity-module strong {
+  margin-top: 2px;
+  color: var(--text-main);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.pipeline-rail {
+  display: grid;
+  gap: 7px;
+}
+
+.pipeline-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px;
+  background: #f9fafb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.pipeline-node .ant-typography {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.audit-drawer > summary {
+  color: #475467;
+  font-size: 13px;
+}
+
+@media (max-width: 1180px) {
+  .quant-command {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .quant-command .ant-btn {
+    min-height: 42px;
+  }
+
+  .quant-workbench,
+  .operator-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .quant-command,
+  .quant-decision-strip,
+  .quant-trade-grid,
+  .maturity-modules {
+    grid-template-columns: 1fr;
+  }
+
+  .quant-decision-strip {
+    padding: 12px;
+  }
+
+  .command-cell .muted {
+    white-space: normal;
+  }
+}

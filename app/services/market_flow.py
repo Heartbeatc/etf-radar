@@ -22,6 +22,19 @@ EXCLUDED_BOARD_KEYWORDS = (
     "昨日", "ST股", "融资融券", "转债", "破净", "预亏", "亏损", "退市", "次新", "新股",
 )
 EXCLUDED_STOCK_KEYWORDS = ("ST", "退", "N", "C")
+CROSS_BORDER_ETF_KEYWORDS = ("港股", "港股通", "恒生", "中概", "H股", "香港", "纳斯达克", "标普", "日经", "德国")
+A_SHARE_PREFERRED_DIRECTIONS = {
+    "innovative_drug",
+    "semiconductor",
+    "ai_compute",
+    "gold_resources",
+    "robotics_highend",
+    "new_energy",
+    "brokerage_finance",
+    "consumer",
+    "dividend_value",
+    "broad_index",
+}
 ADDITIONAL_DIRECTION_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("innovative_drug", "创新药/医药", ("医药生物", "化学制药", "生物制品", "医疗器械", "医疗服务", "CXO", "CRO", "毛发医疗", "原料药", "仿制药")),
     ("gold_resources", "黄金/资源", ("贵金属", "黄金", "钨", "铜", "铝", "锂", "钴", "小金属", "稀有金属", "工业金属", "煤炭", "有色金属", "稀土")),
@@ -301,7 +314,7 @@ def _directions_from_boards(
         breadth_values = [item.breadth_pct for item in items if item.breadth_pct is not None]
         breadth = mean(breadth_values) if breadth_values else None
         linked_etfs = _score_direction_etfs(key, etfs_by_direction.get(key, []))
-        main_etfs, backup_etf = _select_direction_etfs(linked_etfs)
+        main_etfs, backup_etf = _select_direction_etfs(key, linked_etfs)
         linked_stocks = _direction_stocks(items)
         representative = linked_stocks[0] if linked_stocks else _best_direction_stock(items)
         factor_scores, concentration_pct = _direction_factor_scores(
@@ -395,6 +408,13 @@ def _score_direction_etfs(direction_key: str, etfs: list[DiscoveryEtfCandidate])
                 score += 7
             elif candidate.main_net_inflow_pct <= -5:
                 score -= 8
+        if direction_key in A_SHARE_PREFERRED_DIRECTIONS:
+            if _is_cross_border_etf(candidate.name):
+                score -= 24
+                reasons.append("港股/跨境载体降权，非港股方向不优先")
+            else:
+                score += 10
+                reasons.append("A股场内载体优先")
         candidate.mapping_score = _clamp(score)
         candidate.mapping_reason = reasons[:6]
         scored.append(candidate)
@@ -403,15 +423,33 @@ def _score_direction_etfs(direction_key: str, etfs: list[DiscoveryEtfCandidate])
 
 
 def _select_direction_etfs(
+    direction_key: str,
     linked_etfs: list[DiscoveryEtfCandidate],
 ) -> tuple[list[DiscoveryEtfCandidate], DiscoveryEtfCandidate | None]:
-    selected = [item.model_copy(deep=True) for item in linked_etfs[:3]]
+    ranked = list(linked_etfs)
+    if direction_key in A_SHARE_PREFERRED_DIRECTIONS:
+        domestic = [item for item in ranked if not _is_cross_border_etf(item.name)]
+        cross_border = [item for item in ranked if _is_cross_border_etf(item.name)]
+        if domestic:
+            best_domestic = domestic[0].mapping_score or domestic[0].score
+            strong_cross = [
+                item
+                for item in cross_border
+                if (item.mapping_score or item.score) >= best_domestic + 15
+            ]
+            ranked = [*domestic, *strong_cross, *[item for item in cross_border if item not in strong_cross]]
+    selected = [item.model_copy(deep=True) for item in ranked[:3]]
     for idx, item in enumerate(selected):
         item.rank = idx + 1
         item.role = "main" if idx < 2 else "backup"
     main = selected[:2]
     backup = selected[2] if len(selected) >= 3 else None
     return main, backup
+
+
+def _is_cross_border_etf(name: str) -> bool:
+    normalized = name.upper()
+    return any(keyword.upper() in normalized for keyword in CROSS_BORDER_ETF_KEYWORDS)
 
 
 def _direction_stocks(items: list[MarketBoardCandidate]) -> list[MarketStockCandidate]:
@@ -642,7 +680,7 @@ def _etfs_by_direction(etf_report: DiscoveryResponse | None) -> dict[str, list[D
         return {}
     result: dict[str, list[DiscoveryEtfCandidate]] = {}
     for direction in etf_report.directions:
-        result[direction.direction_key] = direction.top_etfs[:3]
+        result[direction.direction_key] = direction.top_etfs[:10]
     return result
 
 

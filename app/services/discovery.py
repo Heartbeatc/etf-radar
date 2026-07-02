@@ -12,6 +12,19 @@ EXCLUDE_KEYWORDS = (
     "货币", "现金", "添富快线", "保证金", "债", "国债", "政金债", "地方债", "城投", "短融",
     "可转债", "转债", "信用", "中短债", "REIT", "REITS", "商品期货",
 )
+CROSS_BORDER_KEYWORDS = ("港股", "港股通", "恒生", "中概", "H股", "香港", "纳斯达克", "标普", "日经", "德国")
+A_SHARE_PREFERRED_DIRECTIONS = {
+    "innovative_drug",
+    "semiconductor",
+    "ai_compute",
+    "gold_resources",
+    "robotics_highend",
+    "new_energy",
+    "brokerage_finance",
+    "consumer",
+    "dividend_value",
+    "broad_index",
+}
 
 DIRECTION_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("innovative_drug", "创新药/医药", ("创新药", "生物医药", "医药", "医疗", "生物科技", "疫苗", "中药")),
@@ -102,7 +115,7 @@ def _is_tradable_etf(snapshot: EtfSnapshot, min_amount: float) -> bool:
 
 def _candidate(snapshot: EtfSnapshot, min_amount: float) -> DiscoveryEtfCandidate:
     direction_key, direction_label = _classify(snapshot.name)
-    score, evidence, risk_flags = _candidate_score(snapshot, min_amount)
+    score, evidence, risk_flags = _candidate_score(snapshot, min_amount, direction_key)
     return DiscoveryEtfCandidate(
         code=snapshot.code,
         name=snapshot.name,
@@ -127,7 +140,7 @@ def _candidate(snapshot: EtfSnapshot, min_amount: float) -> DiscoveryEtfCandidat
     )
 
 
-def _candidate_score(snapshot: EtfSnapshot, min_amount: float) -> tuple[int, list[str], list[str]]:
+def _candidate_score(snapshot: EtfSnapshot, min_amount: float, direction_key: str) -> tuple[int, list[str], list[str]]:
     score = 35.0
     evidence: list[str] = []
     risk_flags: list[str] = []
@@ -201,6 +214,14 @@ def _candidate_score(snapshot: EtfSnapshot, min_amount: float) -> tuple[int, lis
     if change >= 6 and amplitude is not None and amplitude >= 8:
         risk_flags.append("hot direction, avoid chasing at high price")
 
+    if direction_key in A_SHARE_PREFERRED_DIRECTIONS:
+        if _is_cross_border_theme(snapshot.name):
+            score -= 26
+            risk_flags.append("港股/跨境载体，非港股主线不优先作为主ETF")
+        else:
+            score += 10
+            evidence.append("A股场内载体，符合本系统优先交易范围")
+
     return _clamp(score), evidence[:8], risk_flags[:8]
 
 
@@ -248,7 +269,7 @@ def _direction(key: str, items: list[DiscoveryEtfCandidate]) -> DiscoveryDirecti
         total_amount=round(total_amount, 2),
         positive_amount_pct=round(positive_amount / total_amount * 100, 2) if total_amount > 0 else None,
         main_net_inflow=round(inflow, 2),
-        top_etfs=items[:5],
+        top_etfs=items[:12],
     )
 
 
@@ -273,6 +294,11 @@ def _select_candidates(directions: list[DiscoveryDirection]) -> list[DiscoveryEt
             if len(selected) >= 3:
                 break
     return selected[:3]
+
+
+def _is_cross_border_theme(name: str) -> bool:
+    normalized = name.upper()
+    return any(keyword.upper() in normalized for keyword in CROSS_BORDER_KEYWORDS)
 
 
 def _classify(name: str) -> tuple[str, str]:

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  Alert,
   App as AntdApp,
   Badge,
   Button,
@@ -320,14 +319,8 @@ function QuantConsole(props: QuantConsoleProps) {
   const selectedUniverse = (props.framework?.universe ?? []).filter((item) => item.selected);
   const heldCodes = new Set(props.positions.map((item) => item.code));
   const positionActions = (props.framework?.final_actions ?? []).filter((item) => item.has_position || heldCodes.has(item.code));
-  const warnings = [props.errorMessage, props.health?.last_warning, ...(props.framework?.warnings ?? [])]
-    .filter((item): item is string => Boolean(item))
-    .slice(0, 3);
-
   return (
     <main className="trading-console">
-      {warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
-
       <section className={`decision-hero side-${primary.side.toLowerCase()}`}>
         <div className="decision-copy">
           <Text className="eyebrow">当前动作</Text>
@@ -392,8 +385,7 @@ function QuantConsole(props: QuantConsoleProps) {
 
 function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; index: number; primary: boolean }) {
   const role = index === 0 ? '主 ETF 1' : index === 1 ? '主 ETF 2' : '备选 ETF';
-  const blockers = item.blockers.slice(0, 2);
-  const notes = item.notes.slice(0, 2);
+  const blocked = item.blockers.length > 0;
   return (
     <article className={`trade-card side-${item.side.toLowerCase()} ${primary ? 'primary' : ''}`}>
       <div className="trade-card-head">
@@ -402,7 +394,7 @@ function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; 
       </div>
       <div className="trade-identity">
         <strong>{item.name}</strong>
-        <Text className="muted">{item.code} · {item.order_style}</Text>
+        <Text className="muted">{item.code} · {etfRegionLabel(item.name)}</Text>
       </div>
       <div className="trade-metrics">
         <DecisionMetric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
@@ -410,8 +402,7 @@ function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; 
         <DecisionMetric label="止盈" value={formatPrice(item.take_profit_price)} />
         <DecisionMetric label="防守" value={formatPrice(item.stop_price)} />
       </div>
-      <p className={blockers.length ? 'trade-reason risk-text' : 'trade-reason'}>{blockers[0] ?? notes[0] ?? '等待下一轮信号确认。'}</p>
-      {notes[1] && <Text className="muted trade-extra">{notes[1]}</Text>}
+      <p className={blocked ? 'trade-reason risk-text' : 'trade-reason'}>{executionShortText(item)}</p>
     </article>
   );
 }
@@ -422,7 +413,6 @@ function DecisionMetric({ label, value }: { label: string; value: ReactNode }) {
 
 function SignalValidationStrip({ report }: { report?: QuantValidationReport }) {
   const t3 = report?.horizon_metrics.find((item) => item.horizon_days === 3);
-  const state = !report || !t3 || t3.resolved_count < 20 ? '样本不足' : evidenceLabel(report.evidence_strength);
   return (
     <div className="validation-strip">
       <DecisionMetric label="账本记录" value={report ? report.total_records.toFixed(0) : '-'} />
@@ -430,16 +420,12 @@ function SignalValidationStrip({ report }: { report?: QuantValidationReport }) {
       <DecisionMetric label="T+3已验证" value={t3 ? `${t3.resolved_count}/${t3.sample_count}` : '-'} />
       <DecisionMetric label="T+3胜率" value={formatPercentNumber(t3?.win_rate_pct)} />
       <DecisionMetric label="T+3均值" value={formatSignedPercent(t3?.avg_forward_return_pct)} />
-      <div className="validation-note">
-        <Tag color={evidenceColor(report?.evidence_strength)}>{state}</Tag>
-        <Text className="muted">{report?.warnings[0] ?? '信号验证账本会随系统运行自动积累。'}</Text>
-      </div>
+      <DecisionMetric label="样本等级" value={report ? evidenceLabel(report.evidence_strength) : '-'} />
     </div>
   );
 }
 
 function ValidationPanel({ framework, onRefresh, loading }: { framework?: QuantFrameworkResponse; onRefresh: () => void; loading: boolean }) {
-  const validation = framework?.validation;
   const counts = framework ? [
     ['Universe', framework.universe.length],
     ['Features', framework.features.length],
@@ -449,22 +435,9 @@ function ValidationPanel({ framework, onRefresh, loading }: { framework?: QuantF
     ['Exec', framework.execution_plan.length]
   ] : [];
   return (
-    <Panel title="框架状态" icon={<CheckCircleOutlined />} meta={validation?.research_grade ? '研究级' : '-'} extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>刷新链路</Button>}>
+    <Panel title="框架状态" icon={<CheckCircleOutlined />} meta={framework?.validation.research_grade ? '研究级' : '-'} extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>刷新链路</Button>}>
       <div className="score-grid framework-counts">
         {counts.map(([label, value]) => <ScoreBox key={String(label)} label={String(label)} value={Number(value)} />)}
-      </div>
-      <div className="pipeline-list">
-        {(framework?.architecture ?? []).map((stage, index) => <div className="pipeline-step" key={stage}><Tag color="blue">{index + 1}</Tag><Text>{stage}</Text></div>)}
-      </div>
-      <div className="evidence-columns validation-grid">
-        <div>
-          <Text className="metric-label">通过</Text>
-          <TagList items={validation?.passed.slice(0, 5) ?? []} color="green" />
-        </div>
-        <div>
-          <Text className="metric-label">阻断</Text>
-          <TagList items={validation?.blockers.slice(0, 5) ?? []} color="red" />
-        </div>
       </div>
     </Panel>
   );
@@ -487,8 +460,7 @@ function PortfolioRiskRow({ target, risk }: { target: QuantPortfolioTarget; risk
     <div className="row-card quant-row">
       <div>
         <Text strong>{target.name}</Text>
-        <Text className="muted">{target.code} · {rebalanceLabel(target.rebalance_action)} · {target.target_reason}</Text>
-        <TagList items={(risk?.reasons ?? target.evidence).slice(0, 3)} color={risk?.blocked ? 'red' : 'blue'} />
+        <Text className="muted">{target.code} · {rebalanceLabel(target.rebalance_action)}</Text>
       </div>
       <Space size={4} wrap className="row-actions">
         <Tag color={riskColor(risk?.risk_level)}>{risk?.blocked ? '阻断' : riskLabel(risk?.risk_level)}</Tag>
@@ -516,7 +488,7 @@ function UniverseRow({ item }: { item: QuantUniverseAsset }) {
     <div className="row-card quant-row">
       <div>
         <Text strong>{item.name}</Text>
-        <Text className="muted">{item.code ?? item.direction_key ?? '-'} · {assetTypeLabel(item.asset_type)} · {roleLabel(item.role)} · {item.reason}</Text>
+        <Text className="muted">{item.code ?? item.direction_key ?? '-'} · {assetTypeLabel(item.asset_type)} · {roleLabel(item.role)}</Text>
       </div>
       <Space size={4} wrap>
         {item.rank != null && <Tag>#{item.rank}</Tag>}
@@ -565,13 +537,11 @@ function InsightRow({ item }: { item: QuantInsight }) {
 }
 
 function FeatureRow({ item }: { item: QuantFeatureRow }) {
-  const keyMetrics = Object.entries(item.features).filter(([, value]) => typeof value === 'number' || typeof value === 'string').slice(0, 3);
   return (
     <div className="row-card compact-row">
       <div>
         <Text strong>{item.name}</Text>
         <Text className="muted">{item.feature_set}</Text>
-        <Text className="muted">{keyMetrics.map(([key, value]) => `${key}: ${formatFeatureValue(value)}`).join(' · ')}</Text>
       </div>
       <ScoreText value={item.score} />
     </div>
@@ -590,7 +560,7 @@ function PositionPanel({ positions, actions, draft, setDraft, onSave, saving, on
       <Input className="position-note" value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="备注，可不填" />
       <div className="mini-list position-list">
         {positions.map((position) => <PositionRow key={position.code} position={position} action={actions.find((item) => item.code === position.code)} onDelete={onDelete} deleting={deleting && deletingCode === position.code} />)}
-        {!positions.length && <Alert type="info" showIcon message="当前空仓：只等待量化链路给出低吸触发，不因热点追涨。" />}
+        {!positions.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="空仓" />}
       </div>
     </Panel>
   );
@@ -641,7 +611,6 @@ function SystemPanel({ health, session, framework, integrations }: { health?: He
         <StatusMetric icon={<CheckCircleOutlined />} label="基础设施" value={`${okIntegrations}/${integrations.length || 0}`} />
         <StatusMetric icon={<UserOutlined />} label="会话" value={session?.username ?? '-'} />
       </div>
-      <TagList items={framework?.validation.required_upgrades.slice(0, 4) ?? []} color="orange" empty="暂无升级项" />
     </Panel>
   );
 }
@@ -679,6 +648,21 @@ function ActionTag({ action, side }: { action: string; side: string }) {
   return <Tag color={actionColor(side)}>{actionLabel(action)}</Tag>;
 }
 
+function executionShortText(item: QuantExecutionAdvice): string {
+  if (item.blockers.length) return '风控阻断';
+  if (item.side === 'BUY') return '低吸触发';
+  if (item.side === 'SELL') return '卖出/减仓';
+  if (item.side === 'HOLD') return '持有跟踪';
+  if (item.action === 'AVOID') return '回避';
+  if (item.action === 'WAIT_PULLBACK') return '等回落';
+  if (item.action === 'WAIT_BUY_ZONE' || item.action === 'WATCH_LOW_BUY') return '等低吸区';
+  return '等待';
+}
+
+function etfRegionLabel(name: string): string {
+  return /港股|港股通|恒生|中概|H股|香港/.test(name) ? '港股载体' : 'A股载体';
+}
+
 function ScoreText({ value }: { value: number | null | undefined }) {
   if (value == null) return <Text className="muted">-</Text>;
   return <Text strong style={{ color: scoreColor(value) }}>{value.toFixed(0)}</Text>;
@@ -710,7 +694,7 @@ function pickPrimaryExecution(framework?: QuantFrameworkResponse, positions: Pos
       code: priority.code,
       action: priority.action,
       side: priority.side,
-      note: priority.blockers[0] ?? priority.notes[0] ?? priority.order_style
+      note: priority.blockers[0] ?? priority.notes[0] ?? executionShortText(priority)
     };
   }
   return { code: null, action: 'WAIT', side: 'WAIT', note: positions.length ? '等待持仓风控信号。' : '空仓等待低吸触发。' };

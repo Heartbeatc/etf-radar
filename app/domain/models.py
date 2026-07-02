@@ -554,6 +554,117 @@ class QuantDecisionResponse(BaseModel):
 
 
 
+class QuantUniverseAsset(BaseModel):
+    asset_type: str
+    code: str | None = None
+    name: str
+    direction_key: str | None = None
+    direction_label: str | None = None
+    role: str = "candidate"
+    rank: int | None = None
+    selected: bool
+    reason: str
+    evidence: list[str]
+    risk_flags: list[str]
+
+
+class QuantFeatureRow(BaseModel):
+    asset_type: str
+    code: str | None = None
+    name: str
+    direction_key: str | None = None
+    direction_label: str | None = None
+    feature_set: str
+    features: dict[str, Any]
+    score: int
+    evidence: list[str]
+    risk_flags: list[str]
+
+
+class QuantInsight(BaseModel):
+    asset_type: str
+    code: str | None = None
+    name: str
+    direction: str
+    magnitude_score: int
+    confidence_score: int
+    confidence_label: str
+    horizon: str
+    insight_type: str
+    generated_from: str
+    evidence: list[str]
+    risk_flags: list[str]
+
+
+class QuantPortfolioTarget(BaseModel):
+    code: str
+    name: str
+    target_role: str
+    rebalance_action: str
+    target_weight_pct: float | None = None
+    position_delta_pct: int | None = None
+    source_insight: str
+    target_reason: str
+    evidence: list[str]
+    risk_flags: list[str]
+
+
+class QuantRiskAdjustment(BaseModel):
+    code: str
+    name: str
+    original_target_weight_pct: float | None = None
+    adjusted_target_weight_pct: float | None = None
+    position_delta_pct: int | None = None
+    risk_level: str
+    blocked: bool
+    reasons: list[str]
+    risk_flags: list[str]
+
+
+class QuantExecutionAdvice(BaseModel):
+    code: str
+    name: str
+    side: str
+    action: str
+    urgency: str
+    target_weight_pct: float | None = None
+    position_delta_pct: int | None = None
+    order_style: str
+    trigger_price_low: float | None = None
+    trigger_price_high: float | None = None
+    avoid_above: float | None = None
+    stop_price: float | None = None
+    take_profit_price: float | None = None
+    notes: list[str]
+    blockers: list[str]
+
+
+class QuantFrameworkValidation(BaseModel):
+    research_grade: bool
+    live_trading_ready: bool
+    evidence_strength: str
+    passed: list[str]
+    blockers: list[str]
+    required_upgrades: list[str]
+
+
+class QuantFrameworkResponse(BaseModel):
+    generated_at: datetime
+    market_status: str
+    architecture: list[str]
+    universe: list[QuantUniverseAsset]
+    features: list[QuantFeatureRow]
+    insights: list[QuantInsight]
+    portfolio_targets: list[QuantPortfolioTarget]
+    risk_adjustments: list[QuantRiskAdjustment]
+    execution_plan: list[QuantExecutionAdvice]
+    final_actions: list[ActionDecisionItem]
+    validation: QuantFrameworkValidation
+    warnings: list[str]
+    assumptions: list[str]
+
+
+
 class WebLoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=256)

@@ -22,6 +22,7 @@ from app.domain.models import (
     MarketFlowResponse,
     PoolRecommendationResponse,
     QuantDecisionResponse,
+    QuantFrameworkResponse,
     Position,
     PositionInput,
     SignalRecord,
@@ -37,6 +38,7 @@ from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.quant_decision import build_quant_decision_report
+from app.services.quant_framework import build_quant_framework_report
 from app.services.risk import build_risk_report
 from app.api.security import AuthPrincipal, authenticate_web_user, require_api_token
 
@@ -127,6 +129,14 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
         action_report = build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
         return build_quant_decision_report(market_flow_report, pool_report, action_report)
+
+
+    @app.get("/api/v1/quant-framework", response_model=QuantFrameworkResponse, dependencies=PROTECTED)
+    async def quant_framework() -> QuantFrameworkResponse:
+        market_flow_report = await runtime.market_flow()
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        action_report = build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
+        return build_quant_framework_report(settings, market_flow_report, pool_report, action_report, runtime.store.positions())
 
     @app.get("/api/v1/pool-recommendation", response_model=PoolRecommendationResponse, dependencies=PROTECTED)
     async def pool_recommendation() -> PoolRecommendationResponse:

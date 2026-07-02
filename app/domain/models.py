@@ -270,6 +270,44 @@ class RiskReport(BaseModel):
     rules: list[str]
 
 
+class ActionDecisionItem(BaseModel):
+    code: str
+    name: str
+    role: str
+    has_position: bool
+    action: str
+    side: str
+    urgency: str
+    confidence: str
+    action_score: int
+    signal: str
+    current_price: float | None = None
+    entry_price: float | None = None
+    buy_zone_low: float | None = None
+    buy_zone_high: float | None = None
+    avoid_above: float | None = None
+    first_take_profit_price: float | None = None
+    second_take_profit_price: float | None = None
+    effective_exit_price: float | None = None
+    direction_score: int
+    low_buy_score: int
+    hold_score: int
+    take_profit_score: int
+    risk_score: int
+    reasons: list[str]
+    risk_flags: list[str]
+
+
+class ActionDecisionResponse(BaseModel):
+    generated_at: datetime
+    scope: str
+    market_status: str
+    status: str
+    items: list[ActionDecisionItem]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class BacktestSummary(BaseModel):
     generated_at: datetime
     days: int

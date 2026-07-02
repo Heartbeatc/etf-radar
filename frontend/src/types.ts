@@ -284,6 +284,44 @@ export interface RiskResponse {
   rules: string[];
 }
 
+export interface ActionDecisionItem {
+  code: string;
+  name: string;
+  role: string;
+  has_position: boolean;
+  action: string;
+  side: string;
+  urgency: string;
+  confidence: string;
+  action_score: number;
+  signal: string;
+  current_price: number | null;
+  entry_price: number | null;
+  buy_zone_low: number | null;
+  buy_zone_high: number | null;
+  avoid_above: number | null;
+  first_take_profit_price: number | null;
+  second_take_profit_price: number | null;
+  effective_exit_price: number | null;
+  direction_score: number;
+  low_buy_score: number;
+  hold_score: number;
+  take_profit_score: number;
+  risk_score: number;
+  reasons: string[];
+  risk_flags: string[];
+}
+
+export interface ActionDecisionResponse {
+  generated_at: string;
+  scope: string;
+  market_status: string;
+  status: string;
+  items: ActionDecisionItem[];
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface DataQualityItem {
   code: string;
   name: string;

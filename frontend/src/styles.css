@@ -901,3 +901,29 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.action-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.action-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+@media (max-width: 1024px) {
+  .action-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .action-card-grid {
+    grid-template-columns: 1fr;
+  }
+}

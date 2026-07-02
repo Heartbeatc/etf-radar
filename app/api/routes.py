@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.core.runtime import Runtime
 from app.domain.models import (
     AiControlRequest,
+    ActionDecisionResponse,
     AiStatus,
     AiSummaryItem,
     AiSummaryReport,
@@ -30,6 +31,7 @@ from app.domain.models import (
     WebSessionInfo,
     WebSessionResponse,
 )
+from app.services.action_decision import build_action_decision_report
 from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
 from app.services.pool_recommendation import build_pool_recommendation_report
@@ -119,6 +121,11 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     async def pool_recommendation() -> PoolRecommendationResponse:
         market_flow_report = await runtime.market_flow()
         return build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+
+
+    @app.get("/api/v1/action-decisions", response_model=ActionDecisionResponse, dependencies=PROTECTED)
+    async def action_decisions() -> ActionDecisionResponse:
+        return build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
 
     @app.get("/api/v1/risk", response_model=RiskReport, dependencies=PROTECTED)
     async def risk() -> RiskReport:

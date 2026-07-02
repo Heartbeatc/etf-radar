@@ -44,6 +44,8 @@ import ReactECharts from 'echarts-for-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import type {
+  ActionDecisionItem,
+  ActionDecisionResponse,
   AiStatus,
   AiSummaryItem,
   AiSummaryKind,
@@ -111,6 +113,7 @@ function App() {
     ({ signal }) => api.getPoolRecommendation(sessionToken, signal),
     autoRefresh ? 60_000 : false
   );
+  const actionDecisionQuery = useProtectedQuery(['action-decisions', sessionToken], sessionToken, ({ signal }) => api.getActionDecisions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const riskQuery = useProtectedQuery(['risk', sessionToken], sessionToken, ({ signal }) => api.getRisk(sessionToken, signal), autoRefresh ? 30_000 : false);
   const dataQualityQuery = useProtectedQuery(
     ['data-quality', sessionToken],
@@ -189,9 +192,9 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, actionDecisionQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, actionDecisionQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
 
   useEffect(() => {
@@ -263,6 +266,7 @@ function App() {
                 discovery={discoveryQuery.data}
                 marketFlow={marketFlowQuery.data}
                 poolRecommendation={poolRecommendationQuery.data}
+                actionDecisions={actionDecisionQuery.data}
                 risk={riskQuery.data}
                 dataQuality={dataQualityQuery.data}
                 integrations={integrationsQuery.data ?? []}
@@ -344,6 +348,7 @@ interface DashboardProps {
   discovery?: DiscoveryResponse;
   marketFlow?: MarketFlowResponse;
   poolRecommendation?: PoolRecommendationResponse;
+  actionDecisions?: ActionDecisionResponse;
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
@@ -360,14 +365,14 @@ interface DashboardProps {
 }
 
 function Dashboard(props: DashboardProps) {
-  const { latest, discovery, marketFlow, poolRecommendation, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
   const tabItems = [
     {
       key: 'overview',
       label: <span><DashboardOutlined /> 总览</span>,
-      children: <OverviewTab latest={latest} discovery={discovery} marketFlow={marketFlow} risk={risk} dataQuality={dataQuality} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      children: <OverviewTab latest={latest} discovery={discovery} marketFlow={marketFlow} actionDecisions={actionDecisions} risk={risk} dataQuality={dataQuality} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
       key: 'market-flow',
@@ -378,6 +383,11 @@ function Dashboard(props: DashboardProps) {
       key: 'discovery',
       label: <span><LineChartOutlined /> ETF载体</span>,
       children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} poolRecommendation={poolRecommendation} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+    },
+    {
+      key: 'actions',
+      label: <span><SafetyCertificateOutlined /> 动作决策</span>,
+      children: <ActionDecisionTab decisions={actionDecisions} />
     },
     {
       key: 'signals',
@@ -414,15 +424,17 @@ interface OverviewTabProps {
   latest?: LatestResponse;
   discovery?: DiscoveryResponse;
   marketFlow?: MarketFlowResponse;
+  actionDecisions?: ActionDecisionResponse;
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   onForceDiscovery: () => void;
   forcingDiscovery: boolean;
 }
 
-function OverviewTab({ latest, discovery, marketFlow, risk, dataQuality, onForceDiscovery, forcingDiscovery }: OverviewTabProps) {
+function OverviewTab({ latest, discovery, marketFlow, actionDecisions, risk, dataQuality, onForceDiscovery, forcingDiscovery }: OverviewTabProps) {
   return (
     <Space direction="vertical" size="large" className="wide-stack">
+      <ActionDecisionSummary decisions={actionDecisions} />
       <MarketFlowSummary marketFlow={marketFlow} compact />
       <CandidateCards latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} compact />
       <Row gutter={[16, 16]}>
@@ -660,6 +672,96 @@ function SignalsTab({ latest }: { latest?: LatestResponse }) {
       <SignalTable data={latest?.plans ?? []} />
     </section>
   );
+}
+
+function ActionDecisionTab({ decisions }: { decisions?: ActionDecisionResponse }) {
+  return (
+    <Space direction="vertical" size="large" className="wide-stack">
+      <ActionDecisionSummary decisions={decisions} />
+      <section className="panel">
+        <SectionHeader icon={<SafetyCertificateOutlined />} title="固定池动作明细" meta={decisions ? `${actionPortfolioStatusLabel(decisions.status)} · ${formatDateTime(decisions.generated_at)}` : '-'} />
+        {decisions ? <ActionDecisionTable data={decisions.items} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />}
+      </section>
+      {decisions?.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
+    </Space>
+  );
+}
+
+function ActionDecisionSummary({ decisions }: { decisions?: ActionDecisionResponse }) {
+  const items = decisions?.items ?? [];
+  const immediate = items.filter((item) => item.side === 'BUY' || item.side === 'SELL');
+  return (
+    <section className="panel">
+      <SectionHeader icon={<SafetyCertificateOutlined />} title="当下动作" meta={decisions ? `${actionPortfolioStatusLabel(decisions.status)} · ${decisions.market_status}` : '-'} />
+      {decisions ? (
+        <div className="action-card-grid">
+          {items.map((item) => (
+            <article className="action-card" key={item.code}>
+              <Space direction="vertical" size="small" className="card-stack">
+                <Space wrap>
+                  <ActionTag action={item.action} side={item.side} />
+                  <Tag color={item.has_position ? 'green' : 'default'}>{item.has_position ? '有持仓' : '无持仓'}</Tag>
+                  <Tag>{urgencyLabel(item.urgency)}</Tag>
+                </Space>
+                <div>
+                  <div className="candidate-name">{item.name}</div>
+                  <Text className="muted">{item.code} · {roleLabel(item.role)}</Text>
+                </div>
+                <Progress percent={clamp(item.action_score)} size="small" strokeColor={actionColor(item.side)} />
+                <div className="candidate-metrics">
+                  <MetricLabel label="现价" value={formatPrice(item.current_price)} />
+                  <MetricLabel label="买区" value={`${formatPrice(item.buy_zone_low)} - ${formatPrice(item.buy_zone_high)}`} />
+                  <MetricLabel label="止盈一" value={formatPrice(item.first_take_profit_price)} />
+                  <MetricLabel label="防守" value={formatPrice(item.effective_exit_price)} />
+                </div>
+              </Space>
+            </article>
+          ))}
+          {!items.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作" />}
+        </div>
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />
+      )}
+      {decisions && <Text className="metric-foot">可执行动作 {immediate.length}/{items.length}；动态ETF载体未进入固定池前不生成买卖动作。</Text>}
+    </section>
+  );
+}
+
+function ActionDecisionTable({ data }: { data: ActionDecisionItem[] }) {
+  const columns: ColumnsType<ActionDecisionItem> = [
+    { title: '动作', key: 'action', fixed: 'left', width: 140, render: (_, record) => <ActionTag action={record.action} side={record.side} /> },
+    {
+      title: 'ETF',
+      key: 'etf',
+      fixed: 'left',
+      width: 210,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{record.name}</Text>
+          <Text className="muted">{record.code} · {record.has_position ? '有持仓' : '无持仓'}</Text>
+        </Space>
+      )
+    },
+    { title: '动作分', dataIndex: 'action_score', key: 'action_score', width: 110, render: (value: number) => <ScoreCell value={value} /> },
+    { title: '置信', dataIndex: 'confidence', key: 'confidence', width: 90 },
+    { title: '现价', dataIndex: 'current_price', key: 'current_price', width: 90, render: formatPrice },
+    { title: '低吸区间', key: 'buy_zone', width: 150, render: (_, record) => `${formatPrice(record.buy_zone_low)} - ${formatPrice(record.buy_zone_high)}` },
+    { title: '回避价', dataIndex: 'avoid_above', key: 'avoid_above', width: 90, render: formatPrice },
+    { title: '止盈一', dataIndex: 'first_take_profit_price', key: 'first_take_profit_price', width: 90, render: formatPrice },
+    { title: '止盈二', dataIndex: 'second_take_profit_price', key: 'second_take_profit_price', width: 90, render: formatPrice },
+    { title: '防守线', dataIndex: 'effective_exit_price', key: 'effective_exit_price', width: 90, render: formatPrice },
+    { title: '低吸分', dataIndex: 'low_buy_score', key: 'low_buy_score', width: 90, render: (value: number) => <ScoreText value={value} /> },
+    { title: '持有分', dataIndex: 'hold_score', key: 'hold_score', width: 90, render: (value: number) => <ScoreText value={value} /> },
+    { title: '止盈分', dataIndex: 'take_profit_score', key: 'take_profit_score', width: 90, render: (value: number) => <ScoreText value={value} /> },
+    { title: '风险分', dataIndex: 'risk_score', key: 'risk_score', width: 90, render: (value: number) => <Text strong style={{ color: riskScoreColor(value) }}>{value}</Text> },
+    { title: '理由', dataIndex: 'reasons', key: 'reasons', width: 260, render: (items: string[]) => <PoolReasonTags items={items} /> },
+    { title: '风险', dataIndex: 'risk_flags', key: 'risk_flags', width: 260, render: (items: string[]) => <PoolReasonTags items={items} color="orange" /> }
+  ];
+  return <Table rowKey="code" columns={columns} dataSource={data} size="middle" pagination={false} scroll={{ x: 1900 }} />;
+}
+
+function ActionTag({ action, side }: { action: string; side: string }) {
+  return <Tag color={actionColor(side)}>{actionLabel(action)}</Tag>;
 }
 
 function RiskTab({ risk }: { risk?: RiskResponse }) {
@@ -2004,6 +2106,57 @@ function poolActionColor(value: string): string {
     avoid: 'red'
   };
   return map[value] ?? 'default';
+}
+
+function actionLabel(value: string): string {
+  const map: Record<string, string> = {
+    BUY_FIRST_BATCH: '买入首仓',
+    SELL_ALL: '全部卖出',
+    SELL_PARTIAL_50: '止盈一半',
+    SELL_PARTIAL_20_30: '止盈20-30%',
+    REDUCE_OR_HOLD_TIGHT: '减仓/收紧',
+    HOLD: '持有',
+    HOLD_WATCH: '持有观察',
+    WAIT_BUY_ZONE: '等低吸区',
+    WATCH_LOW_BUY: '低吸观察',
+    WAIT_PULLBACK: '等回落',
+    WAIT_DATA: '等数据',
+    AVOID: '回避',
+    WAIT: '等待'
+  };
+  return map[value] ?? value;
+}
+
+function actionColor(side: string): string {
+  const map: Record<string, string> = {
+    BUY: 'green',
+    SELL: 'red',
+    HOLD: 'blue',
+    WAIT: 'orange',
+    AVOID: 'red'
+  };
+  return map[side] ?? 'default';
+}
+
+function urgencyLabel(value: string): string {
+  const map: Record<string, string> = {
+    high: '高优先级',
+    medium: '中优先级',
+    normal: '普通',
+    low: '低优先级'
+  };
+  return map[value] ?? value;
+}
+
+function actionPortfolioStatusLabel(value: string): string {
+  const map: Record<string, string> = {
+    risk_exit: '风险离场',
+    sell_or_reduce: '卖出/减仓',
+    buy_available: '可买入',
+    wait_low_buy: '等待低吸',
+    wait: '等待'
+  };
+  return map[value] ?? value;
 }
 
 function signalLabel(value: string): string {

@@ -22,16 +22,16 @@ def build_action_decision_report(plans: list[TradePlan], positions: dict[str, Po
         warnings.append("有持仓尚未拿到最新行情；等待下一轮采集后再执行动作。")
     return ActionDecisionResponse(
         generated_at=datetime.now(timezone.utc),
-        scope="fixed_pool_plus_positions",
+        scope="quant_pool_plus_positions",
         market_status=market_status(),
         status=status,
         items=items,
         warnings=warnings,
         assumptions=[
-            "动作决策覆盖固定池ETF和用户已登记持仓。",
+            "动作决策覆盖量化推荐ETF和用户已登记持仓。",
             "空仓时只输出首仓、等待低吸区或回避；首仓默认不超过20%。",
             "有持仓时优先输出持有、止盈、减仓或离场，并显示浮盈和建议处理比例。",
-            "动态ETF候选未进入固定池且未登记为持仓前，只作为开仓候选，不生成完整买卖点。",
+            "量化推荐ETF会生成低吸、止盈和防守线；未被推荐且未持仓的ETF不生成买卖动作。",
             "系统不自动下单，动作信号用于辅助人工执行。",
         ],
     )

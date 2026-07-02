@@ -129,7 +129,7 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     async def quant_decision() -> QuantDecisionResponse:
         market_flow_report = await runtime.market_flow()
         pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
-        action_report = build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
+        action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
         return build_quant_decision_report(market_flow_report, pool_report, action_report)
 
 
@@ -137,7 +137,7 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     async def quant_framework() -> QuantFrameworkResponse:
         market_flow_report = await runtime.market_flow()
         pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
-        action_report = build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
+        action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
         report = build_quant_framework_report(settings, market_flow_report, pool_report, action_report, runtime.store.positions())
         runtime.store.save_quant_framework_signals(report)
         return report
@@ -154,7 +154,9 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
 
     @app.get("/api/v1/action-decisions", response_model=ActionDecisionResponse, dependencies=PROTECTED)
     async def action_decisions() -> ActionDecisionResponse:
-        return build_action_decision_report(runtime.build_rule_plans(), runtime.store.positions())
+        market_flow_report = await runtime.market_flow()
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        return build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
 
     @app.get("/api/v1/risk", response_model=RiskReport, dependencies=PROTECTED)
     async def risk() -> RiskReport:

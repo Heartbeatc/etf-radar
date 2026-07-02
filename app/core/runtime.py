@@ -15,7 +15,7 @@ from app.adapters.infra import PostgresInfra, RedisInfra
 from app.adapters.store import Store
 from app.core.config import Settings
 from app.core.market import market_status
-from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, IntegrationStatus, LatestResponse, MarketFlowResponse, Position, SourceStatus, TradePlan
+from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, SourceStatus, TradePlan
 from app.services.ai import AIAnalyst
 from app.services.ai_summary import build_ai_context, due_summary_kinds, make_summary_item, summary_title, summary_windows_payload, trading_date
 from app.services.alerts import AlertManager
@@ -214,6 +214,64 @@ class Runtime:
 
     def build_rule_plans(self) -> list[TradePlan]:
         return build_rule_plans(self.settings, self.store)
+
+    async def build_rule_plans_for_pool(self, pool: PoolRecommendationResponse) -> list[TradePlan]:
+        roles = {code: "main" for code in pool.recommended_main_codes}
+        roles.update({code: "backup" for code in pool.recommended_backup_codes})
+        codes = [*pool.recommended_main_codes, *pool.recommended_backup_codes, *self.store.positions().keys()]
+        return await self.build_rule_plans_for_codes(codes, roles)
+
+    async def build_rule_plans_for_codes(self, codes: list[str], roles: dict[str, str] | None = None) -> list[TradePlan]:
+        code_list = _unique_codes(codes)
+        if not code_list:
+            return []
+        role_map = {code: (roles or {}).get(code, "position") for code in code_list}
+        await self._ensure_plan_data(code_list, role_map)
+        latest = self.store.latest_snapshots()
+        positions = self.store.positions()
+        plans: list[TradePlan] = []
+        for code in code_list:
+            snapshot = latest.get(code)
+            if snapshot is None:
+                continue
+            role = role_map.get(code, snapshot.role)
+            if code in positions:
+                role = "position"
+            plans.append(
+                build_plan(
+                    AnalysisInputs(
+                        snapshot=snapshot.model_copy(update={"role": role}),
+                        daily=self.store.get_daily_bars(code),
+                        minute=self.store.get_minute_bars(code),
+                        position=positions.get(code),
+                        stale_seconds=self.settings.data_stale_seconds,
+                    )
+                )
+            )
+        return plans
+
+    async def _ensure_plan_data(self, codes: list[str], roles: dict[str, str]) -> None:
+        latest = self.store.latest_snapshots()
+        now = datetime.now(timezone.utc)
+        stale_codes = []
+        for code in codes:
+            snapshot = latest.get(code)
+            if snapshot is None:
+                stale_codes.append(code)
+                continue
+            age = (now - snapshot.fetched_at).total_seconds()
+            if age > self.settings.data_stale_seconds:
+                stale_codes.append(code)
+        if stale_codes:
+            snapshots = await self.client.fetch_spot(stale_codes, roles)
+            self.store.save_snapshots(snapshots)
+        for code in codes:
+            if len(self.store.get_daily_bars(code)) < 20:
+                with suppress(Exception):
+                    self.store.save_daily_bars(code, await self.client.fetch_daily(code))
+            if not self.store.get_minute_bars(code):
+                with suppress(Exception):
+                    self.store.save_minute_bars(code, await self.client.fetch_minute(code))
 
     def monitor_codes(self) -> list[str]:
         return monitor_codes(self.settings, self.store)
@@ -462,3 +520,14 @@ def _top(plans: list[TradePlan], field: str) -> str | None:
     if not plans:
         return None
     return max(plans, key=lambda plan: getattr(plan, field)).code
+
+
+def _unique_codes(codes) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for code in codes:
+        if not code or code in seen:
+            continue
+        result.append(code)
+        seen.add(code)
+    return result

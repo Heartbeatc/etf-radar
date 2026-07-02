@@ -42,7 +42,7 @@ def build_quant_decision_report(
         warnings=_dedupe(warnings)[:8],
         assumptions=[
             "第一屏只给最终量化结论，其余页面作为证据。",
-            "ETF完整买卖动作覆盖固定池和用户已登记持仓。",
+            "ETF完整买卖动作覆盖量化候选和用户已登记持仓。",
             "动态候选ETF只给空仓开仓候选，必须入池或登记持仓后才有完整低吸/止盈/防守线。",
             "个股目前用于验证方向强弱，不直接输出个股买卖点。",
             "主升确认需要资金驻留、承接和扩散同时满足；单日热点不等于主升。",
@@ -87,7 +87,7 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
 
 def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
     if direction.state == "confirmed_mainline" and direction.low_buy_readiness_score >= 65:
-        return "main_up_low_buy", "主升低吸段", "high", "允许围绕固定池ETF执行低吸计划，不追高。"
+        return "main_up_low_buy", "主升低吸段", "high", "允许围绕量化候选ETF执行低吸计划，不追高。"
     if direction.state == "confirmed_mainline":
         return "main_up_hold", "主升持有段", "high", "方向处于主升，已有仓位按持有/止盈规则执行，新仓等回踩。"
     if direction.state == "candidate":
@@ -118,7 +118,7 @@ def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResp
 
 def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
     suggested_position_pct = None
-    operation = "空仓候选：先加入固定池监控，拿到低吸区和防守线后再决定。"
+    operation = "空仓候选：等待低吸区、防守线和承接信号同时满足后再决定。"
     if item.direction_state == "confirmed_mainline" and item.low_buy_readiness_score and item.low_buy_readiness_score >= 65:
         suggested_position_pct = 20
         operation = "空仓开仓候选；入池后等待低吸触发，首仓上限20%，未触发不买。"
@@ -135,7 +135,7 @@ def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
         price=item.price,
         suggested_position_pct=suggested_position_pct,
         reasons=item.reasons[:6],
-        risk_flags=item.risk_flags[:6] + ["未进入固定池或持仓监控，暂无完整买卖点"],
+        risk_flags=item.risk_flags[:6] + ["未进入量化候选或持仓监控，暂无完整买卖点"],
     )
 
 
@@ -215,7 +215,7 @@ def _conclusion(direction: QuantDirectionDecision, etfs: list[QuantEtfDecision],
     if holding:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓按持有/止盈/防守线跟踪。"
     if buy:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；固定池出现可执行低吸。"
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；量化候选出现可执行低吸。"
     if candidate_open:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；空仓只等候选ETF入池后的低吸触发。"
     return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前不追高，以等待和验证为主。"

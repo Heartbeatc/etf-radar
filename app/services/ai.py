@@ -65,7 +65,7 @@ class AIAnalyst:
                     "content": (
                         "你是A股场内ETF交易辅助系统的风控型分析员。"
                         "只基于输入数据做盘面总结，不承诺收益，不给绝对买卖命令。"
-                        "输出中文，结构清晰，控制在220字以内。必须包含：市场情绪、主线/候选方向、固定池ETF动作倾向、风险、下一步观察。"
+                        "输出中文，结构清晰，控制在220字以内。必须包含：市场情绪、主线/候选方向、量化候选ETF动作倾向、风险、下一步观察。"
                     ),
                 },
                 {
@@ -193,8 +193,8 @@ def _fallback_market_summary(kind: str, context: dict) -> str:
     plan_text = "；".join(
         f"{item.get('code')} {item.get('signal')} 低吸{item.get('low_buy_score')} 风险{item.get('risk_score')}"
         for item in plans[:3]
-    ) or "固定池暂无有效信号"
-    return f"{titles.get(kind, kind)}：市场最强方向为{strongest}，状态{top_state}。固定池：{plan_text}。仅按规则观察低吸、止盈和防守线，不追高。"
+    ) or "量化候选暂无有效信号"
+    return f"{titles.get(kind, kind)}：市场最强方向为{strongest}，状态{top_state}。量化候选：{plan_text}。仅按规则观察低吸、止盈和防守线，不追高。"
 
 
 def _fallback_summary(plan: TradePlan) -> str:

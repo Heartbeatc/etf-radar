@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     redis_key_prefix: str = "etf_radar"
     redis_timeout_seconds: float = Field(default=3, ge=1, le=30)
 
-    main_etf_codes: str = "159992,159516"
-    backup_etf_codes: str = "515880"
+    main_etf_codes: str = ""
+    backup_etf_codes: str = ""
     benchmark_codes: str = "510300,588000"
 
     @property

@@ -58,9 +58,9 @@ def build_pool_recommendation_report(
         items=items,
         warnings=warnings,
         assumptions=[
-            "固定池建议来自市场方向、ETF载体适配、低吸适配和风险惩罚的量化合成。",
-            "该接口只给出调仓建议，不自动修改 MAIN_ETF_CODES/BACKUP_ETF_CODES。",
-            "未进入固定池前，动态ETF没有完整低吸、止盈、风控和回测信号。",
+            "量化候选来自市场方向、ETF载体适配、低吸适配和风险惩罚的合成评分。",
+            "该接口只输出 2 个主 ETF + 1 个备选 ETF，不自动修改配置，也不自动下单。",
+            "量化入选的 ETF 会进入动作计算链路，生成低吸、止盈、防守和风控提示。",
             "免费数据源无法证明真实资金身份，资金驻留仍需多日验证或付费L2数据增强。",
         ],
     )
@@ -113,7 +113,7 @@ def _score_candidate(direction: MarketDirection, candidate: DiscoveryEtfCandidat
         risk_flags.append("今日强但还未验证次日承接")
     elif direction.state in {"weakening", "weak_direction"}:
         score -= 18
-        risk_flags.append("方向弱化，不适合纳入固定池")
+        risk_flags.append("方向弱化，不适合作为当前量化候选")
 
     if direction.trade_action == "low_buy_allowed":
         score += 6
@@ -221,7 +221,7 @@ def _fixed_pool_gap_item(code: str, role: str, snapshot: EtfSnapshot | None) -> 
         premium_pct=snapshot.premium_pct if snapshot else None,
         entry_bias=None,
         source_time=snapshot.source_time if snapshot else None,
-        reasons=["当前固定池标的未进入量化推荐前三"],
+        reasons=["当前跟踪标的未进入量化推荐前三"],
         risk_flags=["不是当前市场流向模型优先选择的ETF载体"],
     )
 
@@ -290,6 +290,8 @@ def _status(current_roles: dict[str, str], recommended_main: list[str], recommen
     recommended_codes = [*recommended_main, *recommended_backup]
     if not recommended_codes:
         return "no_recommendation"
+    if not current_roles:
+        return "dynamic_selection"
     if current_codes == recommended_codes:
         return "keep"
     overlap = len(set(current_codes) & set(recommended_codes))
@@ -301,11 +303,11 @@ def _status(current_roles: dict[str, str], recommended_main: list[str], recommen
 def _warnings(market_flow: MarketFlowResponse, current_roles: dict[str, str], recommended_codes: list[str]) -> list[str]:
     warnings: list[str] = []
     if market_flow.directions and all(item.state != "confirmed_mainline" for item in market_flow.directions[:3]):
-        warnings.append("当前没有确认主线，固定池建议只能视为候选调仓，不宜自动执行。")
+        warnings.append("当前没有确认主线，量化候选只能视为观察清单，不宜自动执行。")
     missing = [code for code in recommended_codes if code not in current_roles]
     if missing:
-        warnings.append(f"推荐ETF {', '.join(missing)} 尚未进入固定池，暂无完整低吸/止盈/风控信号。")
-    warnings.append("固定池调仓建议未自动写入配置，需要确认后再执行。")
+        warnings.append(f"推荐ETF {', '.join(missing)} 来自动态量化筛选，不是配置硬编码。")
+    warnings.append("量化候选不会自动写入配置或下单，需要人工确认。")
     return warnings
 
 

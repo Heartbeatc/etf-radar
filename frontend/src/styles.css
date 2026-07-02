@@ -1019,6 +1019,75 @@ body {
   line-height: 1;
 }
 
+.algo-recommendations {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.algorithm-stack {
+  display: grid;
+  gap: 7px;
+}
+
+.algorithm-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.algorithm-row.status-recommended {
+  border-left-color: var(--buy);
+}
+
+.algorithm-row.status-required_validation,
+.algorithm-row.status-later {
+  border-left-color: var(--wait);
+}
+
+.algorithm-row.status-not_now,
+.algorithm-row.status-blocked {
+  border-left-color: var(--sell);
+}
+
+.algorithm-row .ant-typography {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.algo-note {
+  margin-top: 4px;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.algo-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.algo-score span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.algo-score strong {
+  color: var(--text-main);
+  font-size: 20px;
+  line-height: 1;
+}
+
 .next-upgrades {
   display: grid;
   gap: 6px;

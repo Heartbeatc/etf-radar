@@ -698,3 +698,28 @@ export interface QuantMaturityReport {
   warnings: string[];
   assumptions: string[];
 }
+
+export interface QuantAlgorithmCandidate {
+  key: string;
+  label: string;
+  family: string;
+  status: string;
+  fit_score: number;
+  implementation_state: string;
+  why_it_matters: string;
+  required_data: string[];
+  current_support: string[];
+  evidence: string[];
+  gaps: string[];
+  next_actions: string[];
+  source_refs: string[];
+}
+
+export interface QuantAlgorithmReport {
+  generated_at: string;
+  current_stack: string[];
+  recommended_next: string[];
+  candidates: QuantAlgorithmCandidate[];
+  warnings: string[];
+  assumptions: string[];
+}

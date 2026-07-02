@@ -15,6 +15,7 @@ const { Text, Title } = Typography;
 function invalidateTradingQueries(queryClient: QueryClient, token: string) {
   queryClient.invalidateQueries({ queryKey: ['quant-framework', token] });
   queryClient.invalidateQueries({ queryKey: ['quant-maturity', token] });
+  queryClient.invalidateQueries({ queryKey: ['quant-algorithms', token] });
   queryClient.invalidateQueries({ queryKey: ['positions', token] });
   queryClient.invalidateQueries({ queryKey: ['health'] });
 }
@@ -38,14 +39,15 @@ function App() {
   const frameworkQuery = useProtectedQuery(['quant-framework', sessionToken], sessionToken, ({ signal }) => api.getQuantFramework(sessionToken, signal), autoRefresh ? 30_000 : false);
   const quantValidationQuery = useProtectedQuery(['quant-validation', sessionToken], sessionToken, ({ signal }) => api.getQuantValidation(sessionToken, signal), autoRefresh ? 60_000 : false);
   const quantMaturityQuery = useProtectedQuery(['quant-maturity', sessionToken], sessionToken, ({ signal }) => api.getQuantMaturity(sessionToken, signal), autoRefresh ? 60_000 : false);
+  const quantAlgorithmsQuery = useProtectedQuery(['quant-algorithms', sessionToken], sessionToken, ({ signal }) => api.getQuantAlgorithms(sessionToken, signal), autoRefresh ? 60_000 : false);
   const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const integrationsQuery = useProtectedQuery(['integrations', sessionToken], sessionToken, ({ signal }) => api.getIntegrations(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiStatusQuery = useProtectedQuery(['ai-status', sessionToken], sessionToken, ({ signal }) => api.getAiStatus(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiSummariesQuery = useProtectedQuery(['ai-summaries', sessionToken], sessionToken, ({ signal }) => api.getAiSummaries(sessionToken, signal), autoRefresh ? 60_000 : false);
 
-  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, quantMaturityQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, quantMaturityQuery.error, quantAlgorithmsQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, quantMaturityQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, quantMaturityQuery, quantAlgorithmsQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [frameworkQuery, positionsQuery].some((query) => query.isLoading);
 
   const clearSession = (openLogin = true) => {
@@ -81,6 +83,7 @@ function App() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quant-framework', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-maturity', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['quant-algorithms', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['quant-validation', sessionToken] });
       message.success('量化链路已刷新');
     },
@@ -197,6 +200,7 @@ function App() {
             framework={frameworkQuery.data}
             quantValidation={quantValidationQuery.data}
             quantMaturity={quantMaturityQuery.data}
+            quantAlgorithms={quantAlgorithmsQuery.data}
             positions={positionsQuery.data ?? []}
             integrations={integrationsQuery.data ?? []}
             aiStatus={aiStatusQuery.data}

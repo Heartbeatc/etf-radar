@@ -664,6 +664,31 @@ class QuantMaturityReport(BaseModel):
     assumptions: list[str]
 
 
+class QuantAlgorithmCandidate(BaseModel):
+    key: str
+    label: str
+    family: str
+    status: str
+    fit_score: int
+    implementation_state: str
+    why_it_matters: str
+    required_data: list[str]
+    current_support: list[str]
+    evidence: list[str]
+    gaps: list[str]
+    next_actions: list[str]
+    source_refs: list[str]
+
+
+class QuantAlgorithmReport(BaseModel):
+    generated_at: datetime
+    current_stack: list[str]
+    recommended_next: list[str]
+    candidates: list[QuantAlgorithmCandidate]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class QuantExecutionAdvice(BaseModel):
     code: str
     name: str

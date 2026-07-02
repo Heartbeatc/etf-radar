@@ -18,6 +18,8 @@ import type {
   HealthResponse,
   IntegrationStatus,
   Position,
+  QuantAlgorithmCandidate,
+  QuantAlgorithmReport,
   QuantExecutionAdvice,
   QuantExecutionCondition,
   QuantFeatureRow,
@@ -83,6 +85,7 @@ interface QuantWorkbenchProps {
   framework?: QuantFrameworkResponse;
   quantValidation?: QuantValidationReport;
   quantMaturity?: QuantMaturityReport;
+  quantAlgorithms?: QuantAlgorithmReport;
   positions: Position[];
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
@@ -164,6 +167,7 @@ export function QuantWorkbench(props: QuantWorkbenchProps) {
         <div className="model-stack">
           <MaturityPanel report={props.quantMaturity} />
           <ProductionReadinessPanel report={props.quantMaturity} />
+          <AlgorithmResearchPanel report={props.quantAlgorithms} />
           <ModelPipelinePanel framework={props.framework} report={props.quantMaturity} />
           <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
         </div>
@@ -312,6 +316,63 @@ function ProductionGateRow({ gate }: { gate: QuantProductionGate }) {
       </div>
     </div>
   );
+}
+
+function AlgorithmResearchPanel({ report }: { report?: QuantAlgorithmReport }) {
+  const candidates = report?.candidates.slice(0, 4) ?? [];
+  return (
+    <Panel title="算法研究栈" icon={<BulbOutlined />} meta={report ? formatDateTime(report.generated_at) : '等待报告'}>
+      <div className="algo-recommendations">
+        <Text className="metric-label">落地顺序</Text>
+        <TagList items={(report?.recommended_next ?? []).slice(0, 3)} color="blue" empty="暂无算法建议" />
+      </div>
+      <div className="algorithm-stack">
+        {candidates.map((item) => <AlgorithmCandidateRow key={item.key} item={item} />)}
+        {!candidates.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无算法研究报告" />}
+      </div>
+    </Panel>
+  );
+}
+
+function AlgorithmCandidateRow({ item }: { item: QuantAlgorithmCandidate }) {
+  return (
+    <div className={`algorithm-row status-${item.status}`}>
+      <div>
+        <Space size={4} wrap>
+          <Text strong>{item.label}</Text>
+          <Tag color={algorithmStatusColor(item.status)}>{algorithmStatusLabel(item.status)}</Tag>
+        </Space>
+        <Text className="muted">{item.family} · {item.implementation_state}</Text>
+        <Text className="algo-note">下一步：{item.next_actions[0] ?? item.gaps[0] ?? '等待验证'}</Text>
+      </div>
+      <div className="algo-score">
+        <span>适配</span>
+        <strong>{item.fit_score.toFixed(0)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function algorithmStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    recommended: '优先',
+    required_validation: '必补',
+    later: '以后',
+    not_now: '暂不',
+    blocked: '阻断'
+  };
+  return labels[status] ?? status;
+}
+
+function algorithmStatusColor(status: string) {
+  const colors: Record<string, string> = {
+    recommended: 'green',
+    required_validation: 'orange',
+    later: 'blue',
+    not_now: 'default',
+    blocked: 'red'
+  };
+  return colors[status] ?? 'default';
 }
 
 function ModelPipelinePanel({ framework, report }: { framework?: QuantFrameworkResponse; report?: QuantMaturityReport }) {

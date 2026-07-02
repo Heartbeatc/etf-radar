@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import log10
 from statistics import mean
@@ -46,6 +47,20 @@ ADDITIONAL_DIRECTION_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("brokerage_finance", "券商/金融", ("证券", "券商", "银行", "保险", "多元金融", "互联金融")),
     ("new_energy", "新能源", ("电池", "锂电", "光伏", "储能", "风电", "新能源车", "充电桩")),
 )
+
+@dataclass
+class DirectionHistoryStats:
+    observations: int = 0
+    days_count: int = 0
+    top3_hits: int = 0
+    candidate_hits: int = 0
+    hot_hits: int = 0
+    weakening_hits: int = 0
+    avg_score: float = 0.0
+    avg_residency: float = 0.0
+    avg_retention: float = 0.0
+    avg_intraday: float = 0.0
+
 
 
 def build_board_candidates(rows: list[dict[str, Any]]) -> list[MarketBoardCandidate]:
@@ -96,18 +111,21 @@ async def build_market_flow_report(
     etf_report: DiscoveryResponse | None = None,
     max_directions: int = 8,
     board_member_samples: int = 14,
+    history: list[MarketFlowResponse] | None = None,
 ) -> MarketFlowResponse:
     rows = await client.fetch_boards()
     boards = build_board_candidates(rows)
     stock_sample_count = await _attach_representative_stocks(client, boards, board_member_samples)
-    directions = _directions_from_boards(boards, etf_report)
+    directions = _directions_from_boards(boards, etf_report, history or [])
     warnings: list[str] = []
     if not boards:
         warnings.append("免费行情源未返回行业/概念板块资金数据，市场流向暂不可用")
     if directions and all(item.state != "confirmed_mainline" for item in directions[:3]):
         warnings.append("当前未确认主线；前排方向只是热点/候选，需要下一交易日承接和资金驻留验证")
     if directions:
-        warnings.append("资金驻留/承接分为免费数据代理指标，证据强度低于 Level-2 或多日持久化资金快照")
+        warnings.append("资金驻留/承接分为免费数据代理指标，证据强度低于 Level-2 或交易所逐笔数据")
+    if directions and all(item.factor_scores.get("history_days", 0) < 3 for item in directions[:3]):
+        warnings.append("前排方向缺少至少3个交易日的历史驻留样本，禁止判定为确认主线")
     if any(item.main_net_inflow is not None and item.main_net_inflow < 0 for item in directions[:2]):
         warnings.append("前排方向包含估算主力净流出，只能按候选观察，不能按确认主线处理")
     return MarketFlowResponse(
@@ -120,7 +138,8 @@ async def build_market_flow_report(
         assumptions=[
             "资金流向先从行业/概念板块识别，不从 ETF 名称倒推。",
             "强势个股只用于验证方向强度，不等于个股买入建议。",
-            "确认主线需要多日驻留和承接；当前接口主要提供实时横截面证据。",
+            "确认主线需要至少3个交易日的历史驻留、方向内扩散、代表股承接和ETF载体确认。",
+            "单日成交额、量比、涨幅只能证明异动强度，不能单独证明主力资金驻留。",
             "免费源适合研究预警，不适合作为交易所级执行依据。",
         ],
     )
@@ -297,11 +316,13 @@ def _stock_candidate(board: MarketBoardCandidate, row: dict[str, Any]) -> Market
 def _directions_from_boards(
     boards: list[MarketBoardCandidate],
     etf_report: DiscoveryResponse | None,
+    history: list[MarketFlowResponse],
 ) -> list[MarketDirection]:
     groups: dict[str, list[MarketBoardCandidate]] = defaultdict(list)
     for board in boards:
         groups[board.direction_key].append(board)
     etfs_by_direction = _etfs_by_direction(etf_report)
+    history_by_direction = _history_by_direction(history)
     market_amount = sum(item.amount or 0 for item in boards)
     directions: list[MarketDirection] = []
     for key, items in groups.items():
@@ -326,6 +347,7 @@ def _directions_from_boards(
             breadth=breadth,
             linked_etfs=linked_etfs,
             linked_stocks=linked_stocks,
+            history_stats=history_by_direction.get(key, DirectionHistoryStats()),
         )
         score = factor_scores["mainline_probability"]
         state = _quant_direction_state(factor_scores, inflow)
@@ -468,6 +490,131 @@ def _direction_stocks(items: list[MarketBoardCandidate]) -> list[MarketStockCand
     return stocks
 
 
+def _history_by_direction(history: list[MarketFlowResponse]) -> dict[str, DirectionHistoryStats]:
+    raw: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        "observations": 0,
+        "days": set(),
+        "top3_hits": 0,
+        "candidate_hits": 0,
+        "hot_hits": 0,
+        "weakening_hits": 0,
+        "scores": [],
+        "residency": [],
+        "retention": [],
+        "intraday": [],
+    })
+    for report in history[:240]:
+        day = report.generated_at.date().isoformat()
+        for rank, direction in enumerate(report.directions, start=1):
+            bucket = raw[direction.direction_key]
+            bucket["observations"] += 1
+            bucket["days"].add(day)
+            if rank <= 3:
+                bucket["top3_hits"] += 1
+            if direction.state in {"confirmed_mainline", "candidate"}:
+                bucket["candidate_hits"] += 1
+            if direction.state == "hot_today":
+                bucket["hot_hits"] += 1
+            if direction.state in {"weakening", "weak_direction"}:
+                bucket["weakening_hits"] += 1
+            bucket["scores"].append(direction.score)
+            bucket["residency"].append(direction.residency_score)
+            bucket["retention"].append(direction.retention_score)
+            bucket["intraday"].append(direction.factor_scores.get("intraday_strength", direction.score))
+
+    stats: dict[str, DirectionHistoryStats] = {}
+    for key, bucket in raw.items():
+        stats[key] = DirectionHistoryStats(
+            observations=int(bucket["observations"]),
+            days_count=len(bucket["days"]),
+            top3_hits=int(bucket["top3_hits"]),
+            candidate_hits=int(bucket["candidate_hits"]),
+            hot_hits=int(bucket["hot_hits"]),
+            weakening_hits=int(bucket["weakening_hits"]),
+            avg_score=mean(bucket["scores"]) if bucket["scores"] else 0.0,
+            avg_residency=mean(bucket["residency"]) if bucket["residency"] else 0.0,
+            avg_retention=mean(bucket["retention"]) if bucket["retention"] else 0.0,
+            avg_intraday=mean(bucket["intraday"]) if bucket["intraday"] else 0.0,
+        )
+    return stats
+
+
+def _persistence_score(stats: DirectionHistoryStats) -> int:
+    if stats.observations <= 0:
+        return 25
+    top3_rate = stats.top3_hits / max(stats.observations, 1)
+    candidate_rate = stats.candidate_hits / max(stats.observations, 1)
+    weakening_rate = stats.weakening_hits / max(stats.observations, 1)
+    score = (
+        24
+        + min(30, stats.days_count * 9)
+        + min(16, stats.observations * 1.5)
+        + top3_rate * 18
+        + candidate_rate * 16
+        + min(10, stats.avg_retention * 0.12)
+        + min(10, stats.avg_residency * 0.10)
+        - weakening_rate * 22
+    )
+    if stats.days_count < 2:
+        score = min(score, 45)
+    elif stats.days_count < 3:
+        score = min(score, 58)
+    return _clamp(score)
+
+
+def _impulse_risk(
+    *,
+    volume_expansion: int,
+    intraday_strength: int,
+    flow_proxy: int,
+    breadth_score: int,
+    leadership: int,
+    etf_confirmation: int,
+    retention: int,
+    history_days: int,
+) -> int:
+    risk = 22.0
+    if history_days < 2:
+        risk += 24
+    elif history_days < 3:
+        risk += 12
+    if volume_expansion >= 75 and intraday_strength >= 68:
+        risk += 16
+    if intraday_strength >= 70 and flow_proxy < 55:
+        risk += 14
+    if breadth_score < 48:
+        risk += 10
+    if leadership < 55:
+        risk += 10
+    if retention < 55:
+        risk += 10
+    if etf_confirmation < 50:
+        risk += 6
+    if flow_proxy >= 62 and breadth_score >= 55 and leadership >= 62:
+        risk -= 10
+    return _clamp(risk)
+
+
+def _evidence_quality(
+    *,
+    breadth: float | None,
+    linked_etfs: list[DiscoveryEtfCandidate],
+    linked_stocks: list[MarketStockCandidate],
+    history_days: int,
+) -> int:
+    score = 28.0
+    if breadth is not None:
+        score += 14
+    if linked_stocks:
+        score += 14
+    if linked_etfs:
+        score += 12
+    if len(linked_etfs) >= 2:
+        score += 8
+    score += min(24, history_days * 8)
+    return _clamp(score)
+
+
 def _direction_factor_scores(
     *,
     items: list[MarketBoardCandidate],
@@ -478,6 +625,7 @@ def _direction_factor_scores(
     breadth: float | None,
     linked_etfs: list[DiscoveryEtfCandidate],
     linked_stocks: list[MarketStockCandidate],
+    history_stats: DirectionHistoryStats,
 ) -> tuple[dict[str, int], float | None]:
     concentration_pct = total_amount / market_amount * 100 if market_amount > 0 else None
     concentration_bonus = (concentration_pct or 0.0) * 3.2
@@ -530,8 +678,33 @@ def _direction_factor_scores(
         residency = min(residency, 74)
 
     retention = _clamp(breadth_score * 0.28 + leadership * 0.24 + flow_proxy * 0.20 + volume_expansion * 0.14 + etf_confirmation * 0.14)
+    persistence = _persistence_score(history_stats)
+    impulse_risk = _impulse_risk(
+        volume_expansion=volume_expansion,
+        intraday_strength=intraday_strength,
+        flow_proxy=flow_proxy,
+        breadth_score=breadth_score,
+        leadership=leadership,
+        etf_confirmation=etf_confirmation,
+        retention=retention,
+        history_days=history_stats.days_count,
+    )
+    evidence_quality = _evidence_quality(
+        breadth=breadth,
+        linked_etfs=linked_etfs,
+        linked_stocks=linked_stocks,
+        history_days=history_stats.days_count,
+    )
     low_buy_readiness = _low_buy_readiness(linked_etfs, relative_strength, breadth_score, flow_proxy)
-    mainline_probability = _clamp(residency * 0.42 + retention * 0.26 + intraday_strength * 0.22 + etf_confirmation * 0.10)
+    raw_probability = _clamp(
+        residency * 0.24
+        + retention * 0.20
+        + intraday_strength * 0.16
+        + etf_confirmation * 0.08
+        + persistence * 0.24
+        + evidence_quality * 0.08
+    )
+    mainline_probability = _clamp(raw_probability - max(0, impulse_risk - 45) * 0.40)
 
     return {
         "capital_weight": capital_weight,
@@ -545,6 +718,12 @@ def _direction_factor_scores(
         "intraday_strength": intraday_strength,
         "residency": _clamp(residency),
         "retention": retention,
+        "persistence": persistence,
+        "history_days": history_stats.days_count,
+        "history_observations": history_stats.observations,
+        "impulse_risk": impulse_risk,
+        "evidence_quality": evidence_quality,
+        "raw_mainline_probability": raw_probability,
         "low_buy_readiness": low_buy_readiness,
         "mainline_probability": mainline_probability,
     }, concentration_pct
@@ -587,6 +766,9 @@ def _quant_direction_state(factors: dict[str, int], inflow: float) -> str:
     intraday = factors["intraday_strength"]
     residency = factors["residency"]
     retention = factors["retention"]
+    persistence = factors.get("persistence", 0)
+    history_days = factors.get("history_days", 0)
+    impulse_risk = factors.get("impulse_risk", 100)
     low_buy = factors["low_buy_readiness"]
     probability = factors["mainline_probability"]
     breadth = factors["breadth"]
@@ -594,9 +776,16 @@ def _quant_direction_state(factors: dict[str, int], inflow: float) -> str:
         return "weakening"
     if intraday >= 76 and low_buy < 45:
         return "overheated"
-    if probability >= 76 and residency >= 72 and retention >= 68:
+    if (
+        history_days >= 3
+        and probability >= 78
+        and residency >= 68
+        and retention >= 66
+        and persistence >= 68
+        and impulse_risk <= 45
+    ):
         return "confirmed_mainline"
-    if probability >= 64 and retention >= 58:
+    if probability >= 64 and retention >= 58 and persistence >= 50 and impulse_risk <= 62:
         return "candidate"
     if intraday >= 70:
         return "hot_today"
@@ -640,6 +829,10 @@ def _quant_evidence(factors: dict[str, int], concentration_pct: float | None, st
         evidence.append("资金驻留代理分较强，仍需多日确认")
     if factors["retention"] >= 65:
         evidence.append("资金承接代理分较强")
+    if factors.get("persistence", 0) >= 65:
+        evidence.append("历史方向驻留样本通过初步验证")
+    elif factors.get("history_days", 0) < 3:
+        evidence.append("历史驻留样本不足3个交易日，不能确认主线")
     if factors["etf_confirmation"] >= 65:
         evidence.append("ETF载体对方向形成确认")
     if state == "hot_today":
@@ -651,6 +844,10 @@ def _quant_risks(factors: dict[str, int], state: str, etfs: list[DiscoveryEtfCan
     risks: list[str] = []
     if state == "overheated":
         risks.append("方向偏热但低吸条件不足，避免追高")
+    if factors.get("history_days", 0) < 3:
+        risks.append("缺少3个交易日以上方向驻留样本")
+    if factors.get("impulse_risk", 0) >= 60:
+        risks.append("一日脉冲/热点噪声风险较高，不能按主线处理")
     if factors["residency"] < 58 and factors["intraday_strength"] >= 70:
         risks.append("单日强度不足以证明资金驻留")
     if factors["flow_proxy"] < 45:

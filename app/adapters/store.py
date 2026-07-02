@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
+from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
 
 
 class Store:
@@ -130,6 +130,13 @@ class Store:
                     payload text not null
                 );
 
+                create table if not exists market_flow_history (
+                    id integer primary key autoincrement,
+                    generated_at text not null,
+                    payload text not null
+                );
+                create index if not exists idx_market_flow_history_time on market_flow_history(generated_at desc);
+
                 create table if not exists runtime_settings (
                     key text primary key,
                     value text not null,
@@ -202,6 +209,30 @@ class Store:
         with self._connect() as conn:
             rows = conn.execute("select code, payload from latest_snapshots").fetchall()
         return {row["code"]: EtfSnapshot.model_validate_json(row["payload"]) for row in rows}
+
+    def save_market_flow_report(self, report: MarketFlowResponse) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "insert into market_flow_history(generated_at, payload) values (?, ?)",
+                (report.generated_at.isoformat(), report.model_dump_json()),
+            )
+            conn.execute(
+                "delete from market_flow_history where id not in (select id from market_flow_history order by generated_at desc limit 600)"
+            )
+
+    def market_flow_history(self, limit: int = 240) -> list[MarketFlowResponse]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "select payload from market_flow_history order by generated_at desc limit ?",
+                (limit,),
+            ).fetchall()
+        reports: list[MarketFlowResponse] = []
+        for row in rows:
+            try:
+                reports.append(MarketFlowResponse.model_validate_json(row["payload"]))
+            except Exception:
+                continue
+        return reports
 
     def save_daily_bars(self, code: str, bars: list[DailyBar]) -> None:
         self._save_bars("daily_bars", code, [bar.model_dump() for bar in bars])

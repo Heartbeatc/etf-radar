@@ -185,7 +185,9 @@ class Runtime:
             self.market_flow_client,
             etf_report=etf_report,
             max_directions=self.settings.discovery_max_directions,
+            history=self.store.market_flow_history(),
         )
+        self.store.save_market_flow_report(report)
         self._market_flow_cache = (now, report)
         return report
 

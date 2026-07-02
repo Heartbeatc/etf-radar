@@ -650,7 +650,7 @@ def _direction_reason(direction: MarketDirection) -> str:
     if direction.state == "confirmed_mainline":
         return "mainline confirmed by current factor model"
     if direction.state == "candidate":
-        return "candidate mainline; needs retention"
+        return "direction candidate; needs multi-day retention"
     if direction.state == "hot_today":
         return "hot today but not persistent enough"
     if direction.state == "overheated":
@@ -716,7 +716,7 @@ def _direction_horizon(state: str) -> str:
     if state == "confirmed_mainline":
         return "T+5 to T+20"
     if state == "candidate":
-        return "T+1 to T+5"
+        return "validation horizon"
     if state == "hot_today":
         return "next-session validation"
     return "intraday monitor"
@@ -746,7 +746,7 @@ def _etf_horizon(item: PoolRecommendationItem, action: ActionDecisionItem | None
     if item.direction_state == "confirmed_mainline":
         return "T+5 to T+20"
     if item.direction_state == "candidate":
-        return "T+1 to T+5"
+        return "validation horizon"
     return "watch"
 
 

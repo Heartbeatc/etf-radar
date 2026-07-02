@@ -45,7 +45,7 @@ def build_quant_decision_report(
             "ETF完整买卖动作覆盖量化候选和用户已登记持仓。",
             "动态候选ETF只给空仓开仓候选，必须入池或登记持仓后才有完整低吸/止盈/防守线。",
             "个股目前用于验证方向强弱，不直接输出个股买卖点。",
-            "主升确认需要资金驻留、承接和扩散同时满足；单日热点不等于主升。",
+            "主升确认需要至少3个交易日的驻留样本、承接、扩散和反证过滤；单日热点不等于主升。",
         ],
     )
 
@@ -66,6 +66,9 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
         f"主线概率 {direction.mainline_probability}",
         f"资金驻留 {direction.residency_score}",
         f"承接 {direction.retention_score}",
+        f"历史天数 {direction.factor_scores.get('history_days', 0)}",
+        f"驻留持续 {direction.factor_scores.get('persistence', 0)}",
+        f"脉冲风险 {direction.factor_scores.get('impulse_risk', 0)}",
         f"低吸适配 {direction.low_buy_readiness_score}",
     ] + direction.evidence[:4]
     return QuantDirectionDecision(
@@ -91,7 +94,7 @@ def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
     if direction.state == "confirmed_mainline":
         return "main_up_hold", "主升持有段", "high", "方向处于主升，已有仓位按持有/止盈规则执行，新仓等回踩。"
     if direction.state == "candidate":
-        return "candidate", "主线候选段", "medium", "先验证承接，ETF只等低吸区，不追涨。"
+        return "candidate", "方向候选段", "medium-low", "先验证多日驻留和承接，ETF只等低吸区，不追涨。"
     if direction.state == "hot_today":
         return "hot_today", "单日爆发段", "medium-low", "观察次日承接，禁止追高。"
     if direction.state == "overheated":
@@ -123,7 +126,7 @@ def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
         suggested_position_pct = 20
         operation = "空仓开仓候选；入池后等待低吸触发，首仓上限20%，未触发不买。"
     elif item.direction_state == "candidate":
-        operation = "主线候选载体，先等回踩和次日承接；未确认前不追。"
+        operation = "方向候选载体，先等回踩和多日承接；未确认前不追。"
     return QuantEtfDecision(
         code=item.code,
         name=item.name,

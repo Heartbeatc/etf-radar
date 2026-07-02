@@ -7,6 +7,7 @@ import {
   Card,
   Col,
   Empty,
+  Grid,
   Input,
   Layout,
   Modal,
@@ -60,6 +61,7 @@ import type {
 
 const { Header, Content } = Layout;
 const { Text, Title } = Typography;
+const { useBreakpoint } = Grid;
 
 function App() {
   const queryClient = useQueryClient();
@@ -69,6 +71,7 @@ function App() {
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const isMobile = useIsMobileLayout();
 
   const healthQuery = useQuery({
     queryKey: ['health'],
@@ -186,7 +189,7 @@ function App() {
         </div>
         <Space size="middle" wrap className="top-actions">
           <BackendBadge health={healthQuery.data} loading={healthQuery.isFetching} />
-          <SessionBadge session={sessionQuery.data} loading={sessionQuery.isFetching} hasToken={Boolean(sessionToken)} />
+          <SessionBadge session={sessionQuery.data} loading={sessionQuery.isFetching} hasToken={Boolean(sessionToken)} compact={isMobile} />
           <Switch checked={autoRefresh} onChange={setAutoRefresh} checkedChildren="自动" unCheckedChildren="手动" />
           <Tooltip title="刷新">
             <Button icon={<ReloadOutlined />} loading={refreshing} onClick={refreshAll} />
@@ -229,6 +232,7 @@ function App() {
       <Modal
         title="网页登录"
         open={loginOpen}
+        width={isMobile ? 'calc(100vw - 24px)' : 520}
         onOk={submitLogin}
         onCancel={() => sessionToken && setLoginOpen(false)}
         okText="登录"
@@ -277,6 +281,11 @@ function useProtectedQuery<T>(
   });
 }
 
+function useIsMobileLayout() {
+  const screens = useBreakpoint();
+  return !screens.md;
+}
+
 interface DashboardProps {
   latest?: LatestResponse;
   discovery?: DiscoveryResponse;
@@ -291,6 +300,7 @@ interface DashboardProps {
 
 function Dashboard(props: DashboardProps) {
   const { latest, discovery, marketFlow, risk, dataQuality, integrations, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const isMobile = useIsMobileLayout();
 
   const tabItems = [
     {
@@ -329,7 +339,7 @@ function Dashboard(props: DashboardProps) {
     <>
       {errorMessage && <Alert className="stack-alert" type="error" showIcon message={errorMessage} />}
       <MetricStrip latest={latest} discovery={discovery} marketFlow={marketFlow} risk={risk} dataQuality={dataQuality} integrations={integrations} />
-      <Tabs className="work-tabs" items={tabItems} destroyInactiveTabPane={false} />
+      <Tabs className="work-tabs" items={tabItems} destroyInactiveTabPane={false} size={isMobile ? 'small' : 'middle'} tabBarGutter={isMobile ? 12 : 24} />
     </>
   );
 }
@@ -406,6 +416,11 @@ function MarketFlowSummary({ marketFlow, compact = false }: { marketFlow?: Marke
 }
 
 function MarketDirectionTable({ data, compact = false }: { data: MarketDirection[]; compact?: boolean }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <MarketDirectionCards data={data} compact={compact} />;
+  }
+
   const columns: ColumnsType<MarketDirection> = [
     {
       title: '方向',
@@ -624,25 +639,25 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
 
   return (
     <Row gutter={[12, 12]} className="metric-row">
-      <Col xs={12} lg={6}>
+      <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
           <Statistic title="当前主线" value={topDirection?.direction_label ?? '-'} prefix={<ThunderboltOutlined />} valueStyle={{ fontSize: 20 }} />
           {topDirection && <Text className="metric-foot">强度 {topDirection.score} · 成交 {formatAmount(topDirection.total_amount)}</Text>}
         </Card>
       </Col>
-      <Col xs={12} lg={6}>
+      <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
           <Statistic title="候选一" value={firstMain?.code ?? latest?.top_low_buy ?? '-'} prefix={<LineChartOutlined />} valueStyle={{ fontSize: 20 }} />
           {firstMain && <Text className="metric-foot">{firstMain.name}</Text>}
         </Card>
       </Col>
-      <Col xs={12} lg={6}>
+      <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
           <Statistic title="候选二" value={secondMain?.code ?? latest?.top_hold ?? '-'} prefix={<BarChartOutlined />} valueStyle={{ fontSize: 20 }} />
           {secondMain && <Text className="metric-foot">{secondMain.name}</Text>}
         </Card>
       </Col>
-      <Col xs={12} lg={6}>
+      <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
           <Statistic title="风险/质量" value={`${risk?.risk_budget_state ?? '-'} / ${dataQuality?.overall_score?.toFixed(0) ?? '-'}`} prefix={<SafetyCertificateOutlined />} valueStyle={{ fontSize: 20 }} />
           <Text className="metric-foot">基础设施 {integrationOk}/{integrations.length || 0}</Text>
@@ -696,13 +711,14 @@ function CandidateCards({ discovery, onForceDiscovery, forcingDiscovery, compact
 }
 
 function DirectionChart({ directions }: { directions: DiscoveryDirection[] }) {
+  const isMobile = useIsMobileLayout();
   const option = useMemo(() => {
-    const top = directions.slice(0, 8);
+    const top = directions.slice(0, isMobile ? 6 : 8);
     return {
       color: ['#1677ff'],
       tooltip: { trigger: 'axis' },
-      grid: { left: 36, right: 16, top: 24, bottom: 72 },
-      xAxis: { type: 'category', data: top.map((item) => item.direction_label), axisLabel: { interval: 0, rotate: 28 } },
+      grid: { left: isMobile ? 30 : 36, right: 12, top: 24, bottom: isMobile ? 82 : 72 },
+      xAxis: { type: 'category', data: top.map((item) => item.direction_label), axisLabel: { interval: 0, rotate: isMobile ? 42 : 28, fontSize: isMobile ? 10 : 12 } },
       yAxis: { type: 'value', min: 0, max: 100 },
       series: [
         {
@@ -713,16 +729,21 @@ function DirectionChart({ directions }: { directions: DiscoveryDirection[] }) {
         }
       ]
     };
-  }, [directions]);
+  }, [directions, isMobile]);
 
   if (!directions.length) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无方向" />;
   }
 
-  return <ReactECharts option={option} style={{ height: 310 }} notMerge lazyUpdate />;
+  return <ReactECharts option={option} style={{ height: isMobile ? 260 : 310 }} notMerge lazyUpdate />;
 }
 
 function DirectionTable({ data }: { data: DiscoveryDirection[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <DirectionCards data={data} />;
+  }
+
   const columns: ColumnsType<DiscoveryDirection> = [
     { title: '方向', dataIndex: 'direction_label', key: 'direction_label', fixed: 'left', width: 150 },
     { title: '强度', dataIndex: 'score', key: 'score', width: 140, render: (value: number) => <ScoreCell value={value} /> },
@@ -737,6 +758,11 @@ function DirectionTable({ data }: { data: DiscoveryDirection[] }) {
 }
 
 function CandidateTable({ data }: { data: DiscoveryEtfCandidate[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <CandidateTableCards data={data} />;
+  }
+
   const columns: ColumnsType<DiscoveryEtfCandidate> = [
     { title: '角色', dataIndex: 'role', key: 'role', width: 90, render: (value: string) => <Tag color={value === 'backup' ? 'gold' : 'blue'}>{roleLabel(value)}</Tag> },
     {
@@ -767,6 +793,11 @@ function CandidateTable({ data }: { data: DiscoveryEtfCandidate[] }) {
 }
 
 function SignalTable({ data, compact = false }: { data: TradingPlan[]; compact?: boolean }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <SignalCards data={data} compact={compact} />;
+  }
+
   const columns: ColumnsType<TradingPlan> = [
     {
       title: 'ETF',
@@ -808,6 +839,11 @@ function SignalTable({ data, compact = false }: { data: TradingPlan[]; compact?:
 }
 
 function RiskTable({ data }: { data: RiskItem[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <RiskCards data={data} />;
+  }
+
   const columns: ColumnsType<RiskItem> = [
     {
       title: 'ETF',
@@ -835,6 +871,11 @@ function RiskTable({ data }: { data: RiskItem[] }) {
 }
 
 function QualityTable({ data }: { data: DataQualityItem[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <QualityCards data={data} />;
+  }
+
   const columns: ColumnsType<DataQualityItem> = [
     {
       title: 'ETF',
@@ -863,6 +904,11 @@ function QualityTable({ data }: { data: DataQualityItem[] }) {
 }
 
 function IntegrationTable({ data }: { data: IntegrationStatus[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <IntegrationCards data={data} />;
+  }
+
   const columns: ColumnsType<IntegrationStatus> = [
     { title: '组件', dataIndex: 'name', key: 'name', width: 120, render: (value: string) => <Text strong>{value}</Text> },
     { title: '状态', dataIndex: 'ok', key: 'ok', width: 90, render: (ok: boolean) => <Badge status={ok ? 'success' : 'error'} text={ok ? '正常' : '异常'} /> },
@@ -870,6 +916,257 @@ function IntegrationTable({ data }: { data: IntegrationStatus[] }) {
     { title: '详情', dataIndex: 'detail', key: 'detail', ellipsis: true }
   ];
   return <Table rowKey="name" columns={columns} dataSource={data} size="small" pagination={false} />;
+}
+
+
+function MarketDirectionCards({ data, compact = false }: { data: MarketDirection[]; compact?: boolean }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无市场流向" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.direction_key}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.direction_label}</Text>
+              <Text className="mobile-card-subtitle">成交 {formatAmount(record.total_amount)} · 均涨 {record.avg_change_pct == null ? '-' : formatPct(record.avg_change_pct)}</Text>
+            </div>
+            <MobileScoreBadge label="主线" value={record.mainline_probability} />
+          </div>
+          <div className="mobile-card-tags">
+            <MarketStateTag value={record.state} />
+            <Tag>{record.capital_status}</Tag>
+            <TradeActionTag value={record.trade_action} />
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="驻留" value={<ScoreText value={record.residency_score} />} />
+            <MobileMetric label="承接" value={<ScoreText value={record.retention_score} />} />
+            <MobileMetric label="低吸" value={<ScoreText value={record.low_buy_readiness_score} />} />
+            <MobileMetric label="扩散" value={<PercentValue value={record.breadth_pct} neutral />} />
+            <MobileMetric label="资金占比" value={<PercentValue value={record.capital_concentration_pct} neutral />} />
+            <MobileMetric label="资金流" value={<MoneyValue value={record.main_net_inflow} />} />
+          </div>
+          <MobileCardSection label="强股验证"><StrongStockCell direction={record} /></MobileCardSection>
+          <MobileCardSection label="ETF载体"><LinkedEtfsCell direction={record} /></MobileCardSection>
+          {!compact && <MobileCardSection label="因子"><FactorScoresCell direction={record} /></MobileCardSection>}
+          <MobileCardSection label="强板块"><BoardTags direction={record} /></MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DirectionCards({ data }: { data: DiscoveryDirection[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无方向" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.direction_key}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.direction_label}</Text>
+              <Text className="mobile-card-subtitle">{record.etf_count} 个ETF · {record.positive_count} 个上涨</Text>
+            </div>
+            <MobileScoreBadge label="强度" value={record.score} />
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="均涨幅" value={<PercentValue value={record.avg_change_pct} />} />
+            <MobileMetric label="成交额" value={formatAmount(record.total_amount)} />
+            <MobileMetric label="正向成交" value={<PercentValue value={record.positive_amount_pct} neutral />} />
+            <MobileMetric label="主力净流" value={<MoneyValue value={record.main_net_inflow} />} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function CandidateTableCards({ data }: { data: DiscoveryEtfCandidate[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无候选ETF" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={`${record.role}-${record.code}`}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.name}</Text>
+              <Text className="mobile-card-subtitle">{record.code} · {record.direction_label}</Text>
+            </div>
+            <Tag color={record.role === 'backup' ? 'gold' : 'blue'}>{roleLabel(record.role)}</Tag>
+          </div>
+          <div className="mobile-card-tags">
+            <EntryBiasTag value={record.entry_bias} />
+            {record.risk_flags.map((flag) => <Tag color="red" key={flag}>{flag}</Tag>)}
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="评分" value={<ScoreText value={record.score} />} />
+            <MobileMetric label="价格" value={formatPrice(record.price)} />
+            <MobileMetric label="涨跌" value={<PercentValue value={record.change_pct} />} />
+            <MobileMetric label="成交额" value={formatAmount(record.amount)} />
+            <MobileMetric label="净流" value={<MoneyValue value={record.main_net_inflow} />} />
+            <MobileMetric label="溢价" value={<PercentValue value={record.premium_pct} neutral />} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SignalCards({ data, compact = false }: { data: TradingPlan[]; compact?: boolean }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无交易信号" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.code}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.name}</Text>
+              <Text className="mobile-card-subtitle">{record.code} · {roleLabel(record.role)}</Text>
+            </div>
+            <SignalTag value={record.signal} />
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="方向" value={<ScoreText value={record.direction_score} />} />
+            <MobileMetric label="低吸" value={<ScoreText value={record.low_buy_score} />} />
+            <MobileMetric label="持有" value={<ScoreText value={record.hold_score} />} />
+            <MobileMetric label="止盈" value={<ScoreText value={record.take_profit_score} />} />
+            <MobileMetric label="风险" value={<Text strong style={{ color: riskScoreColor(record.risk_score) }}>{record.risk_score.toFixed(0)}</Text>} />
+            <MobileMetric label="现价" value={formatPrice(record.current_price)} />
+          </div>
+          <MobileCardSection label="低吸区间">{formatPrice(record.buy_zone.zone_low)} - {formatPrice(record.buy_zone.zone_high)} · 回避 {formatPrice(record.buy_zone.avoid_above)}</MobileCardSection>
+          {!compact && <MobileCardSection label="止盈/防守">止盈 {formatPrice(record.take_profit_plan.first_take_profit_price)} / {formatPrice(record.take_profit_plan.second_take_profit_price)} · 防守 {formatPrice(record.exit_plan.effective_exit_price)}</MobileCardSection>}
+          <MobileCardSection label="提示"><WarningTags warnings={record.warnings} /></MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function RiskCards({ data }: { data: RiskItem[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无风险" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.code}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.name}</Text>
+              <Text className="mobile-card-subtitle">{record.code}</Text>
+            </div>
+            <RiskLevelTag value={record.risk_level} />
+          </div>
+          <div className="mobile-card-tags"><SignalTag value={record.signal} /></div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="风险分" value={<Text strong style={{ color: riskScoreColor(record.risk_score) }}>{record.risk_score.toFixed(0)}</Text>} />
+            <MobileMetric label="止盈分" value={<ScoreText value={record.take_profit_score} />} />
+            <MobileMetric label="现价" value={formatPrice(record.current_price)} />
+            <MobileMetric label="硬止损" value={formatPrice(record.hard_stop_price)} />
+            <MobileMetric label="趋势离场" value={formatPrice(record.trend_exit_price)} />
+            <MobileMetric label="防守线" value={formatPrice(record.effective_exit_price)} />
+          </div>
+          <MobileCardSection label="止盈动作">{record.take_profit_action}</MobileCardSection>
+          <MobileCardSection label="提示"><WarningTags warnings={record.warnings} /></MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function QualityCards({ data }: { data: DataQualityItem[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据质量" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.code}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.name}</Text>
+              <Text className="mobile-card-subtitle">{record.code} · {roleLabel(record.role)}</Text>
+            </div>
+            <Badge status={record.ok ? 'success' : 'error'} text={record.ok ? '正常' : '异常'} />
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="评分" value={<ScoreText value={record.score} />} />
+            <MobileMetric label="源" value={<Tag>{record.source}</Tag>} />
+            <MobileMetric label="年龄" value={record.age_seconds == null ? '-' : `${record.age_seconds.toFixed(0)}s`} />
+            <MobileMetric label="价格" value={formatPrice(record.price)} />
+            <MobileMetric label="IOPV" value={formatPrice(record.iopv)} />
+            <MobileMetric label="溢价" value={<PercentValue value={record.premium_pct} neutral />} />
+            <MobileMetric label="成交额" value={formatAmount(record.amount)} />
+            <MobileMetric label="净流占比" value={<PercentValue value={record.main_net_inflow_pct} />} />
+          </div>
+          <MobileCardSection label="问题"><WarningTags warnings={record.issues} /></MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function IntegrationCards({ data }: { data: IntegrationStatus[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无基础设施状态" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.name}>
+          <div className="mobile-card-head">
+            <Text strong className="mobile-card-title">{record.name}</Text>
+            <Badge status={record.ok ? 'success' : 'error'} text={record.ok ? '正常' : '异常'} />
+          </div>
+          <div className="mobile-metric-grid compact">
+            <MobileMetric label="启用" value={record.enabled ? '是' : '否'} />
+          </div>
+          <MobileCardSection label="详情">{record.detail}</MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MobileScoreBadge({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="mobile-score-badge">
+      <span>{label}</span>
+      <strong style={{ color: scoreColor(value) }}>{value.toFixed(0)}</strong>
+    </div>
+  );
+}
+
+function MobileMetric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="mobile-metric">
+      <Text className="mobile-metric-label">{label}</Text>
+      <div className="mobile-metric-value">{value}</div>
+    </div>
+  );
+}
+
+function MobileCardSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mobile-card-section">
+      <Text className="mobile-section-label">{label}</Text>
+      <div className="mobile-section-body">{children}</div>
+    </div>
+  );
 }
 
 function RiskList({ risk }: { risk?: RiskResponse }) {
@@ -940,7 +1237,7 @@ function BackendBadge({ health, loading }: { health?: HealthResponse; loading: b
   return <Badge status={health.ok ? 'success' : 'error'} text={health.ok ? '后端在线' : '后端异常'} />;
 }
 
-function SessionBadge({ session, loading, hasToken }: { session?: WebSessionInfo; loading: boolean; hasToken: boolean }) {
+function SessionBadge({ session, loading, hasToken, compact = false }: { session?: WebSessionInfo; loading: boolean; hasToken: boolean; compact?: boolean }) {
   if (!hasToken) {
     return <Badge status="default" text="未登录" />;
   }
@@ -951,7 +1248,7 @@ function SessionBadge({ session, loading, hasToken }: { session?: WebSessionInfo
     return <Badge status="warning" text="会话待验证" />;
   }
   const expires = session.expires_at ? ` · ${formatDateTime(session.expires_at)}` : '';
-  return <Badge status="success" text={`${session.username}${expires}`} />;
+  return <Badge status="success" text={compact ? session.username : `${session.username}${expires}`} />;
 }
 
 function ScoreCell({ value }: { value: number }) {

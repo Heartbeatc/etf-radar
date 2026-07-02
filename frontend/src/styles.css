@@ -281,3 +281,402 @@ body {
     flex-direction: column;
   }
 }
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.ant-layout,
+.ant-layout-content {
+  min-width: 0;
+}
+
+.topbar {
+  gap: 12px;
+}
+
+.brand {
+  flex: 0 1 auto;
+}
+
+.brand > div {
+  min-width: 0;
+}
+
+.brand-title,
+.brand-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.top-actions .ant-space-item {
+  min-width: 0;
+}
+
+.top-actions .ant-badge-status-text {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ant-table-wrapper {
+  max-width: 100%;
+}
+
+.ant-table-wrapper .ant-table-container {
+  max-width: 100%;
+}
+
+.mobile-card-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+.mobile-data-card {
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.mobile-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mobile-card-title-block {
+  min-width: 0;
+}
+
+.mobile-card-title {
+  display: block;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-subtitle {
+  display: block;
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.mobile-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mobile-metric-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mobile-metric {
+  min-width: 0;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 6px;
+}
+
+.mobile-metric-label,
+.mobile-section-label {
+  display: block;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.mobile-metric-value {
+  min-width: 0;
+  margin-top: 3px;
+  color: #111827;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mobile-card-section {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f2f5;
+}
+
+.mobile-section-body {
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.mobile-score-badge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  min-width: 52px;
+  padding: 5px 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.mobile-score-badge span {
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.mobile-score-badge strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .brand {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .brand-title {
+    font-size: 18px !important;
+  }
+
+  .brand-subtitle {
+    display: block;
+    font-size: 12px;
+  }
+
+  .top-actions {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 8px !important;
+  }
+
+  .top-actions .ant-badge-status-text {
+    max-width: 108px;
+  }
+
+  .content {
+    padding: 10px 8px 24px;
+  }
+
+  .boundary-alert,
+  .stack-alert {
+    margin-bottom: 10px;
+  }
+
+  .boundary-alert .ant-alert-message,
+  .stack-alert .ant-alert-message {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .panel {
+    padding: 12px;
+  }
+
+  .metric-row {
+    margin-bottom: 12px;
+  }
+
+  .metric-card .ant-card-body {
+    padding: 12px;
+  }
+
+  .metric-card .ant-statistic-title {
+    margin-bottom: 4px;
+    font-size: 12px;
+  }
+
+  .metric-card .ant-statistic-content {
+    max-width: 100%;
+    font-size: 18px !important;
+    line-height: 1.25;
+  }
+
+  .metric-card .ant-statistic-content-value {
+    display: inline-block;
+    max-width: calc(100% - 28px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: bottom;
+    white-space: nowrap;
+  }
+
+  .metric-foot {
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  .work-tabs .ant-tabs-nav {
+    margin: 0 -8px 12px;
+    padding: 0 8px;
+  }
+
+  .work-tabs .ant-tabs-nav-wrap {
+    overflow-x: auto !important;
+  }
+
+  .work-tabs .ant-tabs-nav-list {
+    min-width: max-content;
+  }
+
+  .work-tabs .ant-tabs-tab {
+    padding: 8px 0;
+  }
+
+  .work-tabs .ant-tabs-tab-btn span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .section-header {
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .section-header > .ant-space {
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .section-header > .ant-btn {
+    width: 100%;
+  }
+
+  .chart-panel {
+    min-height: 320px;
+  }
+
+  .candidate-card {
+    padding: 12px;
+  }
+
+  .candidate-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .risk-row,
+  .quality-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .risk-name {
+    display: block;
+    margin-left: 0;
+  }
+
+  .mobile-card-head {
+    align-items: flex-start;
+  }
+
+  .mobile-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mobile-card-section {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .ant-modal {
+    top: 12px;
+    max-width: calc(100vw - 24px);
+    margin: 0 auto;
+  }
+
+  .ant-modal .ant-modal-content {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-actions .ant-badge-status-text {
+    max-width: 88px;
+  }
+
+  .top-actions .ant-switch {
+    min-width: 58px;
+  }
+
+  .content {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .panel {
+    padding: 10px;
+  }
+
+  .mobile-data-card {
+    padding: 10px;
+  }
+
+  .mobile-card-head {
+    gap: 8px;
+  }
+
+  .mobile-score-badge {
+    min-width: 48px;
+    padding: 4px 6px;
+  }
+
+  .mobile-score-badge strong {
+    font-size: 17px;
+  }
+}

@@ -362,7 +362,7 @@ function OverviewTab({ latest, discovery, marketFlow, risk, dataQuality, onForce
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={14}>
           <section className="panel">
-            <SectionHeader icon={<BarChartOutlined />} title="固定池信号" meta={latest ? formatDateTime(latest.generated_at) : '-'} />
+            <SectionHeader icon={<BarChartOutlined />} title="固定池信号" meta={latest ? latestDataTimeMeta(latest) : '-'} />
             <SignalTable data={latest?.plans ?? []} compact />
           </section>
         </Col>
@@ -589,7 +589,7 @@ function DiscoveryTab({ discovery, onForceDiscovery, forcingDiscovery }: { disco
 function SignalsTab({ latest }: { latest?: LatestResponse }) {
   return (
     <section className="panel">
-      <SectionHeader icon={<BarChartOutlined />} title="交易信号" meta={latest ? formatDateTime(latest.generated_at) : '-'} />
+      <SectionHeader icon={<BarChartOutlined />} title="交易信号" meta={latest ? latestDataTimeMeta(latest) : '-'} />
       <SignalTable data={latest?.plans ?? []} />
     </section>
   );
@@ -1334,9 +1334,42 @@ function WarningTags({ warnings }: { warnings: string[] }) {
   }
   return (
     <Space size={[0, 4]} wrap>
-      {warnings.map((warning) => <Tag color="orange" key={warning}>{warning}</Tag>)}
+      {warnings.map((warning) => (
+        <Tooltip key={warning} title={warning}>
+          <Tag color="orange">{warningLabel(warning)}</Tag>
+        </Tooltip>
+      ))}
     </Space>
   );
+}
+
+function warningLabel(value: string): string {
+  const premiumMatch = value.match(/^IOPV premium ([+-]?\d+(?:\.\d+)?)% is above low-buy threshold$/);
+  if (premiumMatch) {
+    return `IOPV溢价 ${premiumMatch[1]}%，高于低吸阈值`;
+  }
+  const staleMatch = value.match(/^data stale over (\d+) seconds$/);
+  if (staleMatch) {
+    return `行情超过 ${staleMatch[1]} 秒未更新`;
+  }
+  const snapshotStaleMatch = value.match(/^stale snapshot over (\d+)s$/);
+  if (snapshotStaleMatch) {
+    return `快照超过 ${snapshotStaleMatch[1]} 秒未更新`;
+  }
+  const map: Record<string, string> = {
+    'price is too far above VWAP for low-buy': '价格明显高于VWAP，不适合低吸',
+    'price far below VWAP; confirm it is not breakdown': '价格显著低于VWAP，先确认不是破位',
+    'price is extended above MA5': '价格明显高于MA5，不追高',
+    '3-day gain is too fast; wait for pullback': '3日涨幅过快，等回踩',
+    'intraday volatility is high; split orders only': '盘中波动偏高，只适合分批',
+    'price below MA20; trend risk high': '价格跌破MA20，趋势风险较高',
+    'same-day drawdown is severe; avoid catching a falling market': '当日回撤较大，避免接下跌',
+    'invalid price': '价格无效',
+    'missing latest snapshot': '缺少最新行情快照',
+    'missing ETF IOPV': '缺少ETF IOPV',
+    'ETF premium/discount absolute value over 3%': 'ETF溢折价绝对值超过3%'
+  };
+  return map[value] ?? value;
 }
 
 function PercentValue({ value, neutral = false }: { value: number | null | undefined; neutral?: boolean }) {
@@ -1449,6 +1482,13 @@ function formatDateTime(value: string): string {
     second: '2-digit',
     hour12: false
   }).format(date);
+}
+
+function latestDataTimeMeta(latest: LatestResponse): string {
+  if (latest.data_time) {
+    return `行情 ${formatDateTime(latest.data_time)}`;
+  }
+  return `生成 ${formatDateTime(latest.generated_at)}`;
 }
 
 function roleLabel(value: string): string {

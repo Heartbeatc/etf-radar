@@ -46,6 +46,8 @@ def build_plan(inputs: AnalysisInputs) -> TradePlan:
         take_profit_score=take_profit_score,
         risk_score=risk_score,
         current_price=s.price,
+        source_time=s.source_time,
+        fetched_at=s.fetched_at,
         buy_zone=buy_zone,
         hold_plan=_hold_plan(s, metrics, hold_score, inputs.position),
         take_profit_plan=_take_profit_plan(s, metrics, take_profit_score, inputs.position, buy_zone),

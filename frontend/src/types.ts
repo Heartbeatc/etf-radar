@@ -64,6 +64,8 @@ export interface TradingPlan {
   take_profit_score: number;
   risk_score: number;
   current_price: number | null;
+  source_time: string | null;
+  fetched_at: string | null;
   buy_zone: BuyZone;
   hold_plan: HoldPlan;
   take_profit_plan: TakeProfitPlan;
@@ -75,6 +77,7 @@ export interface TradingPlan {
 
 export interface LatestResponse {
   generated_at: string;
+  data_time: string | null;
   poll_interval_seconds: number;
   market_status: string;
   data_age_seconds: number | null;

@@ -177,8 +177,11 @@ class Runtime:
         snapshots = self.store.latest_snapshots()
         benchmarks = [snapshots[code] for code in self.settings.benchmark_code_list if code in snapshots]
         ages = [(datetime.now(timezone.utc) - item.fetched_at).total_seconds() for item in snapshots.values()]
+        fixed_snapshots = [snapshots.get(plan.code) for plan in plans]
+        fixed_times = [item.source_time or item.fetched_at for item in fixed_snapshots if item and (item.source_time or item.fetched_at)]
         return LatestResponse(
             generated_at=datetime.now(timezone.utc),
+            data_time=max(fixed_times) if fixed_times else None,
             poll_interval_seconds=self.settings.poll_interval_seconds,
             market_status=market_status(),
             data_age_seconds=round(min(ages), 2) if ages else None,

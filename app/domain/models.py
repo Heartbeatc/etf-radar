@@ -86,6 +86,8 @@ class TradePlan(BaseModel):
     take_profit_score: int
     risk_score: int
     current_price: float | None
+    source_time: datetime | None = None
+    fetched_at: datetime | None = None
     buy_zone: dict[str, Any]
     hold_plan: dict[str, Any]
     take_profit_plan: dict[str, Any]
@@ -97,6 +99,7 @@ class TradePlan(BaseModel):
 
 class LatestResponse(BaseModel):
     generated_at: datetime
+    data_time: datetime | None = None
     poll_interval_seconds: int
     market_status: str
     data_age_seconds: float | None

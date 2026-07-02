@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Empty,
   Grid,
   Input,
@@ -60,6 +61,7 @@ import type {
   LatestResponse,
   MarketDirection,
   MarketFlowResponse,
+  MarketStockCandidate,
   PoolRecommendationItem,
   PoolRecommendationResponse,
   Position,
@@ -464,17 +466,7 @@ function Dashboard(props: DashboardProps) {
   const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, quantDecision, positions, positionDraft, onPositionDraftChange, onSavePosition, savingPosition, onDeletePosition, deletingPositionCode, deletingPosition, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
-  const tabItems = [
-    {
-      key: 'quant',
-      label: <span><DashboardOutlined /> 量化结论</span>,
-      children: <QuantDecisionTab decision={quantDecision} />
-    },
-    {
-      key: 'overview',
-      label: <span><DashboardOutlined /> 证据总览</span>,
-      children: <OverviewTab latest={latest} discovery={discovery} marketFlow={marketFlow} actionDecisions={actionDecisions} risk={risk} dataQuality={dataQuality} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
-    },
+  const advancedTabItems = [
     {
       key: 'market-flow',
       label: <span><ThunderboltOutlined /> 市场流向</span>,
@@ -486,19 +478,9 @@ function Dashboard(props: DashboardProps) {
       children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} poolRecommendation={poolRecommendation} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
-      key: 'positions',
-      label: <span><SafetyCertificateOutlined /> 持仓</span>,
-      children: <PositionsTab positions={positions} draft={positionDraft} setters={onPositionDraftChange} onSave={onSavePosition} saving={savingPosition} onDelete={onDeletePosition} deletingCode={deletingPositionCode} deleting={deletingPosition} />
-    },
-    {
       key: 'actions',
-      label: <span><SafetyCertificateOutlined /> 动作决策</span>,
+      label: <span><SafetyCertificateOutlined /> 动作明细</span>,
       children: <ActionDecisionTab decisions={actionDecisions} />
-    },
-    {
-      key: 'signals',
-      label: <span><BarChartOutlined /> 交易信号</span>,
-      children: <SignalsTab latest={latest} />
     },
     {
       key: 'risk',
@@ -506,13 +488,8 @@ function Dashboard(props: DashboardProps) {
       children: <RiskTab risk={risk} />
     },
     {
-      key: 'ai',
-      label: <span><BulbOutlined /> AI总结</span>,
-      children: <AiSummaryTab status={aiStatus} report={aiSummaries} onToggle={onToggleAi} toggling={togglingAi} onGenerate={onGenerateAi} generatingKind={generatingAiKind} generating={generatingAi} />
-    },
-    {
       key: 'quality',
-      label: <span><DatabaseOutlined /> 数据质量</span>,
+      label: <span><DatabaseOutlined /> 数据/基础设施</span>,
       children: <QualityTab dataQuality={dataQuality} integrations={integrations} />
     }
   ];
@@ -520,9 +497,343 @@ function Dashboard(props: DashboardProps) {
   return (
     <>
       {errorMessage && <Alert className="stack-alert" type="error" showIcon message={errorMessage} />}
-      <Tabs className="work-tabs" items={tabItems} destroyInactiveTabPane={false} size={isMobile ? 'small' : 'middle'} tabBarGutter={isMobile ? 12 : 24} />
+      <TradingDesk {...props} />
+      <Collapse
+        className="advanced-collapse"
+        bordered={false}
+        items={[
+          {
+            key: 'advanced',
+            label: <span className="advanced-collapse-title">高级数据 / 排查时展开</span>,
+            children: <Tabs className="work-tabs compact" items={advancedTabItems} destroyInactiveTabPane={false} size={isMobile ? 'small' : 'middle'} tabBarGutter={isMobile ? 12 : 20} />
+          }
+        ]}
+      />
     </>
   );
+}
+
+function TradingDesk(props: DashboardProps) {
+  const { latest, marketFlow, actionDecisions, quantDecision, positions, positionDraft, onPositionDraftChange, onSavePosition, savingPosition, onDeletePosition, deletingPositionCode, deletingPosition, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery } = props;
+  const warnings = [...(quantDecision?.warnings ?? []), ...(marketFlow?.warnings ?? [])].filter(Boolean).slice(0, 3);
+
+  return (
+    <Space direction="vertical" size="middle" className="wide-stack decision-desk">
+      <DeskHero decision={quantDecision} marketFlow={marketFlow} dataQuality={dataQuality} latest={latest} />
+      {warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
+
+      <Row gutter={[14, 14]}>
+        <Col xs={24} xl={14}>
+          <MainlineCard decision={quantDecision} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+        </Col>
+        <Col xs={24} xl={10}>
+          <NowActionCard decision={quantDecision} actionDecisions={actionDecisions} positions={positions} risk={risk} dataQuality={dataQuality} integrations={integrations} />
+        </Col>
+      </Row>
+
+      <Row gutter={[14, 14]}>
+        <Col xs={24} xl={15}>
+          <EtfCarrierDesk decision={quantDecision} marketFlow={marketFlow} />
+        </Col>
+        <Col xs={24} xl={9}>
+          <StrongStockDesk decision={quantDecision} marketFlow={marketFlow} />
+        </Col>
+      </Row>
+
+      <Row gutter={[14, 14]}>
+        <Col xs={24} xl={15}>
+          <PositionCommandDesk
+            positions={positions}
+            decision={quantDecision}
+            actionDecisions={actionDecisions}
+            draft={positionDraft}
+            setters={onPositionDraftChange}
+            onSave={onSavePosition}
+            saving={savingPosition}
+            onDelete={onDeletePosition}
+            deletingCode={deletingPositionCode}
+            deleting={deletingPosition}
+          />
+        </Col>
+        <Col xs={24} xl={9}>
+          <AiDesk status={aiStatus} report={aiSummaries} onToggle={onToggleAi} toggling={togglingAi} onGenerate={onGenerateAi} generatingKind={generatingAiKind} generating={generatingAi} />
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+
+function DeskHero({ decision, marketFlow, dataQuality, latest }: { decision?: QuantDecisionResponse; marketFlow?: MarketFlowResponse; dataQuality?: DataQualityResponse; latest?: LatestResponse }) {
+  const topDirection = marketFlow?.directions?.[0];
+  const directionLabel = decision?.direction.direction_label ?? topDirection?.direction_label ?? '等待方向确认';
+  const phaseLabel = decision?.direction.phase_label ?? (topDirection ? marketStateLabel(topDirection.state) : '暂无阶段');
+  const confidence = decision ? confidenceLabel(decision.direction.confidence) : '-';
+  const gate = getQualityGate(dataQuality);
+  const generatedAt = decision?.generated_at ?? marketFlow?.generated_at ?? latest?.generated_at;
+
+  return (
+    <section className="panel desk-hero">
+      <div className="desk-hero-main">
+        <div className="desk-hero-copy">
+          <Text className="desk-kicker">今日交易结论</Text>
+          <h1>{decision?.conclusion ?? '等待量化结论生成，当前不做主动交易动作'}</h1>
+          <Space size={[6, 6]} wrap>
+            <Tag color="blue">方向 {directionLabel}</Tag>
+            <Tag color={decision ? phaseColor(decision.direction.phase) : 'default'}>{phaseLabel}</Tag>
+            <Tag>置信 {confidence}</Tag>
+            <Tag color={gate.tagColor}>数据 {gate.label}</Tag>
+          </Space>
+        </div>
+        <div className="desk-hero-side">
+          <MetricLabel label="更新时间" value={generatedAt ? formatDateTime(generatedAt) : '-'} />
+          <MetricLabel label="市场状态" value={decision?.market_status ?? latest?.market_status ?? '-'} />
+          <MetricLabel label="轮询" value={latest ? `${latest.poll_interval_seconds}s` : '30s'} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MainlineCard({ decision, marketFlow, onForceDiscovery, forcingDiscovery }: { decision?: QuantDecisionResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
+  const top = marketFlow?.directions?.[0];
+  const direction = decision?.direction;
+  const metrics = [
+    ['主线概率', direction?.mainline_probability ?? top?.mainline_probability ?? null],
+    ['资金驻留', direction?.residency_score ?? top?.residency_score ?? null],
+    ['承接', direction?.retention_score ?? top?.retention_score ?? null],
+    ['低吸条件', direction?.low_buy_readiness_score ?? top?.low_buy_readiness_score ?? null]
+  ] as const;
+  const evidence = direction?.evidence?.length ? direction.evidence : top?.evidence ?? [];
+  const risks = direction?.risk_flags?.length ? direction.risk_flags : top?.risk_flags ?? [];
+
+  return (
+    <section className="panel desk-panel mainline-panel">
+      <SectionHeader icon={<ThunderboltOutlined />} title="主线与阶段" meta={marketFlow ? formatDateTime(marketFlow.generated_at) : '-'} extra={<Button size="small" icon={<ReloadOutlined />} onClick={onForceDiscovery} loading={forcingDiscovery}>刷新方向</Button>} />
+      <div className="mainline-title-row">
+        <div>
+          <Text className="muted">系统当前识别</Text>
+          <div className="mainline-name">{direction?.direction_label ?? top?.direction_label ?? '-'}</div>
+        </div>
+        <Space wrap>
+          {direction && <Tag color={phaseColor(direction.phase)}>{direction.phase_label}</Tag>}
+          {top && <MarketStateTag value={top.state} />}
+          {top && <TradeActionTag value={top.trade_action} />}
+        </Space>
+      </div>
+      <div className="desk-score-grid">
+        {metrics.map(([label, value]) => <DeskScore key={label} label={label} value={value} />)}
+      </div>
+      <EvidenceStrip title="确认依据" items={evidence.slice(0, 4)} />
+      <EvidenceStrip title="风险点" items={risks.slice(0, 4)} color="orange" empty="暂无突出风险" />
+    </section>
+  );
+}
+
+function NowActionCard({ decision, actionDecisions, positions, risk, dataQuality, integrations }: { decision?: QuantDecisionResponse; actionDecisions?: ActionDecisionResponse; positions: Position[]; risk?: RiskResponse; dataQuality?: DataQualityResponse; integrations: IntegrationStatus[] }) {
+  const gate = getQualityGate(dataQuality);
+  const items = actionDecisions?.items ?? [];
+  const active = items.filter((item) => item.side === 'BUY' || item.side === 'SELL').slice(0, 3);
+  const watch = items.filter((item) => item.side !== 'BUY' && item.side !== 'SELL').slice(0, 2);
+  const integrationOk = integrations.filter((item) => item.ok).length;
+
+  return (
+    <section className="panel desk-panel now-panel">
+      <SectionHeader icon={<SafetyCertificateOutlined />} title="现在该做什么" meta={actionDecisions ? actionPortfolioStatusLabel(actionDecisions.status) : '-'} />
+      <div className="desk-command">
+        <Tag color={active.length ? 'green' : 'orange'}>{active.length ? '有动作候选' : '等待条件'}</Tag>
+        <p>{decision?.direction.operation ?? (positions.length ? '已有持仓按风控线处理；没有量化动作前不主动加仓。' : '空仓时先等主线确认和低吸区，不因为热点当天强就追。')}</p>
+      </div>
+      <div className="quick-state-grid">
+        <MetricLabel label="持仓" value={`${positions.length} 个`} />
+        <MetricLabel label="风控" value={risk?.risk_budget_state ?? '-'} />
+        <MetricLabel label="数据" value={gate.label} />
+        <MetricLabel label="基础设施" value={`${integrationOk}/${integrations.length || 0}`} />
+      </div>
+      <div className="mini-action-list">
+        {[...active, ...watch].slice(0, 4).map((item) => (
+          <div className="mini-action" key={item.code}>
+            <div>
+              <Text strong>{item.name}</Text>
+              <Text className="muted">{item.code} · {item.execution_note}</Text>
+            </div>
+            <ActionTag action={item.action} side={item.side} />
+          </div>
+        ))}
+        {!items.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />}
+      </div>
+    </section>
+  );
+}
+
+function EtfCarrierDesk({ decision, marketFlow }: { decision?: QuantDecisionResponse; marketFlow?: MarketFlowResponse }) {
+  const etfs = getDeskEtfCards(decision, marketFlow);
+  return (
+    <section className="panel desk-panel">
+      <SectionHeader icon={<LineChartOutlined />} title="ETF载体：2主1备" meta={`${etfs.length} 个候选`} />
+      {etfs.length ? (
+        <div className="desk-etf-grid">
+          {etfs.map((item, index) => <DeskEtfCard key={`${item.code}-${index}`} item={item} index={index} />)}
+        </div>
+      ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无ETF候选" />}
+    </section>
+  );
+}
+
+function DeskEtfCard({ item, index }: { item: QuantEtfDecision | DiscoveryEtfCandidate; index: number }) {
+  const isQuant = 'operation' in item;
+  const role = isQuant ? item.role : item.role;
+  const action = isQuant ? item.action : item.entry_bias;
+  const side = isQuant ? quantActionSide(item.action) : 'WAIT';
+  const price = isQuant ? item.price : item.price;
+  const score = isQuant ? item.score : (item.mapping_score ?? item.score);
+  const reasons = isQuant ? item.reasons : [...(item.mapping_reason ?? []), ...(item.evidence ?? [])];
+  const risks = isQuant ? item.risk_flags : item.risk_flags;
+
+  return (
+    <article className="desk-etf-card">
+      <div className="desk-etf-head">
+        <div>
+          <Tag color={index < 2 ? 'blue' : 'gold'}>{index < 2 ? `主${index + 1}` : '备选'}</Tag>
+          {role && <Tag>{roleLabel(role)}</Tag>}
+        </div>
+        {isQuant ? <ActionTag action={action} side={side} /> : <EntryBiasTag value={action} />}
+      </div>
+      <div className="candidate-name">{item.name}</div>
+      <Text className="muted">{item.code} · {item.direction_label ?? '-'}</Text>
+      <div className="candidate-metrics decision-metrics desk-card-metrics">
+        <MetricLabel label="分数" value={<ScoreText value={score} />} />
+        <MetricLabel label="现价" value={formatPrice(price)} />
+        {isQuant && <MetricLabel label="低吸" value={`${formatPrice(item.buy_zone_low)} - ${formatPrice(item.buy_zone_high)}`} />}
+        {isQuant && <MetricLabel label="防守" value={formatPrice(item.exit_price)} />}
+        {!isQuant && <MetricLabel label="成交" value={formatAmount(item.amount)} />}
+        {!isQuant && <MetricLabel label="溢价" value={<PercentValue value={item.premium_pct} neutral />} />}
+      </div>
+      <EvidenceStrip title="理由" items={reasons.slice(0, 2)} compact />
+      <EvidenceStrip title="风险" items={risks.slice(0, 2)} color="orange" empty="无明显风险" compact />
+    </article>
+  );
+}
+
+function StrongStockDesk({ decision, marketFlow }: { decision?: QuantDecisionResponse; marketFlow?: MarketFlowResponse }) {
+  const stocks = decision?.stocks?.length ? decision.stocks : (marketFlow?.directions?.[0]?.linked_stocks ?? []);
+  return (
+    <section className="panel desk-panel">
+      <SectionHeader icon={<BarChartOutlined />} title="强股验证" meta={`${stocks.length} 个`} />
+      {stocks.length ? (
+        <div className="strong-stock-list">
+          {stocks.slice(0, 5).map((stock) => (
+            <div className="strong-stock-row" key={stock.code}>
+              <div>
+                <Text strong>{stock.name}</Text>
+                <Text className="muted">{stock.code} · {stockDirectionLabel(stock)}</Text>
+              </div>
+              <Space size={4} wrap>
+                <ScoreText value={stock.score} />
+                {'change_pct' in stock && <PercentValue value={stock.change_pct} />}
+              </Space>
+            </div>
+          ))}
+        </div>
+      ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无强股验证" />}
+      <Text className="metric-foot">强股只验证方向强弱，不代表个股买入建议。</Text>
+    </section>
+  );
+}
+
+function stockDirectionLabel(stock: QuantStockDecision | MarketStockCandidate): string {
+  return 'direction_label' in stock ? stock.direction_label ?? '-' : stock.board_name ?? '-';
+}
+
+function PositionCommandDesk({ positions, decision, actionDecisions, draft, setters, onSave, saving, onDelete, deletingCode, deleting }: { positions: Position[]; decision?: QuantDecisionResponse; actionDecisions?: ActionDecisionResponse; draft: PositionDraft; setters: PositionDraftSetters; onSave: () => void; saving: boolean; onDelete: (code: string) => void; deletingCode: string | null; deleting: boolean }) {
+  const positionActions = (actionDecisions?.items ?? []).filter((item) => item.has_position);
+  const fixedActions = decision?.fixed_pool_actions ?? [];
+
+  return (
+    <section className="panel desk-panel">
+      <SectionHeader icon={<SafetyCertificateOutlined />} title="我的持仓动作" meta={positions.length ? `${positions.length} 个持仓` : '当前空仓'} />
+      {!positions.length && (
+        <Alert className="position-empty-alert" type="info" showIcon message="空仓时系统只给候选和低吸区；没有明确买点，不因为方向热就强行进场。" />
+      )}
+      <div className="position-desk-grid">
+        <div className="compact-position-form">
+          <Input value={draft.code} onChange={(event) => setters.setCode(event.target.value)} placeholder="代码，例如 513120" maxLength={6} />
+          <Input value={draft.entry} onChange={(event) => setters.setEntry(event.target.value)} placeholder="成本价" type="number" inputMode="decimal" />
+          <Input value={draft.shares} onChange={(event) => setters.setShares(event.target.value)} placeholder="份额，可空" type="number" inputMode="decimal" />
+          <Input value={draft.note} onChange={(event) => setters.setNote(event.target.value)} placeholder="备注" />
+          <Button type="primary" loading={saving} onClick={onSave}>保存</Button>
+        </div>
+        <div className="position-action-list">
+          {positionActions.map((item) => (
+            <div className="mini-action" key={item.code}>
+              <div>
+                <Text strong>{item.name}</Text>
+                <Text className="muted">浮盈 <PercentValue value={item.floating_profit_pct} /> · 防守 {formatPrice(item.effective_exit_price)}</Text>
+              </div>
+              <ActionTag action={item.action} side={item.side} />
+            </div>
+          ))}
+          {!positionActions.length && fixedActions.slice(0, 3).map((item) => (
+            <div className="mini-action" key={item.code}>
+              <div>
+                <Text strong>{item.name}</Text>
+                <Text className="muted">{item.code} · {item.operation}</Text>
+              </div>
+              <ActionTag action={item.action} side={quantActionSide(item.action)} />
+            </div>
+          ))}
+          {!positionActions.length && !fixedActions.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无持仓动作" />}
+        </div>
+      </div>
+      {positions.length > 0 && <PositionTable positions={positions} onDelete={onDelete} deletingCode={deletingCode} deleting={deleting} />}
+    </section>
+  );
+}
+
+function AiDesk({ status, report, onToggle, toggling, onGenerate, generatingKind, generating }: { status?: AiStatus; report?: AiSummaryReport; onToggle: (enabled: boolean) => void; toggling: boolean; onGenerate: (kind: AiSummaryKind | string) => void; generatingKind: AiSummaryKind | string | null; generating: boolean }) {
+  const summaries = report?.summaries ?? [];
+  const latest = summaries[0];
+
+  return (
+    <section className="panel desk-panel">
+      <SectionHeader icon={<BulbOutlined />} title="AI总结" meta={status ? `${status.calls_used_today}/${status.daily_call_limit}` : '-'} extra={<Switch checked={Boolean(status?.enabled)} loading={toggling} onChange={onToggle} disabled={!status?.configured} checkedChildren="开" unCheckedChildren="关" />} />
+      {latest ? <AiSummaryCard item={latest} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无AI时段总结" />}
+      <Space size={[6, 6]} wrap className="ai-desk-actions">
+        {(status?.windows ?? []).map((window) => (
+          <Button key={window.kind} size="small" onClick={() => onGenerate(window.kind)} loading={generating && generatingKind === window.kind} disabled={!status?.enabled || !status.configured}>{window.title}</Button>
+        ))}
+      </Space>
+    </section>
+  );
+}
+
+function DeskScore({ label, value }: { label: string; value: number | null | undefined }) {
+  const score = typeof value === 'number' ? value : null;
+  return (
+    <div className="desk-score">
+      <Text className="metric-label">{label}</Text>
+      <span style={{ color: score == null ? '#6b7280' : scoreColor(score) }}>{score == null ? '-' : score.toFixed(0)}</span>
+    </div>
+  );
+}
+
+function EvidenceStrip({ title, items, color = 'blue', empty = '暂无', compact = false }: { title: string; items: string[]; color?: string; empty?: string; compact?: boolean }) {
+  return (
+    <div className={compact ? 'evidence-strip compact' : 'evidence-strip'}>
+      <Text className="metric-label">{title}</Text>
+      {items.length ? <PoolReasonTags items={items} color={color} /> : <Text className="muted">{empty}</Text>}
+    </div>
+  );
+}
+
+function getDeskEtfCards(decision?: QuantDecisionResponse, marketFlow?: MarketFlowResponse): Array<QuantEtfDecision | DiscoveryEtfCandidate> {
+  if (decision?.etfs?.length) {
+    return decision.etfs.slice(0, 3);
+  }
+  const direction = marketFlow?.directions?.find((item) => getDirectionCarrierEtfs(item).length > 0) ?? marketFlow?.directions?.[0];
+  if (!direction) {
+    return [];
+  }
+  return getDirectionCarrierEtfs(direction).slice(0, 3);
 }
 
 function QuantDecisionTab({ decision }: { decision?: QuantDecisionResponse }) {

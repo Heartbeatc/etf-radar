@@ -90,13 +90,13 @@ async def build_market_flow_report(
     directions = _directions_from_boards(boards, etf_report)
     warnings: list[str] = []
     if not boards:
-        warnings.append("no market boards were returned by free Eastmoney source")
+        warnings.append("免费行情源未返回行业/概念板块资金数据，市场流向暂不可用")
     if directions and all(item.state != "confirmed_mainline" for item in directions[:3]):
-        warnings.append("no confirmed mainline yet; top directions are hot/candidate signals that need next-session acceptance")
+        warnings.append("当前未确认主线；前排方向只是热点/候选，需要下一交易日承接和资金驻留验证")
     if directions:
-        warnings.append("residency and retention scores are free-data proxies; paid Level-2 or persisted multi-day snapshots are required for stronger proof")
+        warnings.append("资金驻留/承接分为免费数据代理指标，证据强度低于 Level-2 或多日持久化资金快照")
     if any(item.main_net_inflow is not None and item.main_net_inflow < 0 for item in directions[:2]):
-        warnings.append("top directions include negative estimated main flow; treat as candidate, not confirmed mainline")
+        warnings.append("前排方向包含估算主力净流出，只能按候选观察，不能按确认主线处理")
     return MarketFlowResponse(
         generated_at=datetime.now(timezone.utc),
         source="eastmoney_board_flow_free",
@@ -105,10 +105,10 @@ async def build_market_flow_report(
         directions=directions[:max_directions],
         warnings=warnings,
         assumptions=[
-            "Board flow starts from industry/concept boards, not ETF names.",
-            "Strong stock is a representative verifier for the direction, not a standalone buy recommendation.",
-            "Confirmed mainline requires multi-day persistence; this endpoint currently provides live/cross-sectional evidence.",
-            "Free source is suitable for research alerts, not exchange-grade execution.",
+            "资金流向先从行业/概念板块识别，不从 ETF 名称倒推。",
+            "强势个股只用于验证方向强度，不等于个股买入建议。",
+            "确认主线需要多日驻留和承接；当前接口主要提供实时横截面证据。",
+            "免费源适合研究预警，不适合作为交易所级执行依据。",
         ],
     )
 
@@ -132,7 +132,7 @@ async def _attach_representative_stocks(
             if stock is not None:
                 board.representative_stock = stock
         except Exception as exc:
-            board.risk_flags.append(f"member fetch failed: {str(exc)[:80]}")
+            board.risk_flags.append(f"成分股抓取失败：{str(exc)[:80]}")
 
     await asyncio.gather(*(fetch_and_score(board) for board in targets))
     return sample_count
@@ -182,10 +182,10 @@ def _leader_stock(board: MarketBoardCandidate) -> MarketStockCandidate | None:
     if not board.leader_code or not board.leader_name:
         return None
     score = 55
-    evidence = ["board reported this stock as leading stock"]
+    evidence = ["板块接口标记为领涨股"]
     if board.leader_change_pct is not None and board.leader_change_pct >= 9:
         score += 15
-        evidence.append("leader is near daily limit")
+        evidence.append("领涨股接近涨停")
     return MarketStockCandidate(
         code=board.leader_code,
         name=board.leader_name,
@@ -217,50 +217,50 @@ def _stock_candidate(board: MarketBoardCandidate, row: dict[str, Any]) -> Market
 
     if change >= 9:
         score += 22
-        evidence.append("stock is near daily limit")
+        evidence.append("个股接近涨停")
     elif change >= 5:
         score += 16
-        evidence.append("stock is strongly up")
+        evidence.append("个股涨幅较强")
     elif change >= 2:
         score += 9
     elif change < 0:
         score -= 12
-        risk_flags.append("stock price is weak")
+        risk_flags.append("个股价格走弱")
 
     score += min(15.0, max(0.0, log10(max(amount, 1) / 50_000_000) * 6 + 4))
     if amount >= 500_000_000:
-        evidence.append("stock liquidity confirms attention")
+        evidence.append("个股成交额确认关注度")
 
     if volume_ratio is not None:
         if volume_ratio >= 2:
             score += 8
-            evidence.append("stock volume ratio is high")
+            evidence.append("个股量比显著放大")
         elif volume_ratio >= 1.2:
             score += 4
         elif volume_ratio < 0.7:
             score -= 4
-            risk_flags.append("stock volume ratio is weak")
+            risk_flags.append("个股量比偏弱")
 
     if inflow_pct is not None:
         if inflow_pct >= 10:
             score += 14
-            evidence.append("estimated main flow is strong")
+            evidence.append("估算主力资金流入较强")
         elif inflow_pct >= 3:
             score += 8
         elif inflow_pct < -5:
             score -= 10
-            risk_flags.append("estimated main flow is negative")
+            risk_flags.append("估算主力资金为净流出")
 
     if turnover is not None:
         if 3 <= turnover <= 18:
             score += 5
         elif turnover > 30:
             score -= 6
-            risk_flags.append("turnover is very high")
+            risk_flags.append("换手率过高，短线波动风险上升")
 
     if _is_excluded_stock(name):
         score -= 25
-        risk_flags.append("new/ST/abnormal name; verifier quality discounted")
+        risk_flags.append("新股/ST/异常简称，强股验证权重降低")
 
     return MarketStockCandidate(
         code=code,
@@ -365,29 +365,29 @@ def _score_direction_etfs(direction_key: str, etfs: list[DiscoveryEtfCandidate])
         reasons: list[str] = []
         if candidate.direction_key == direction_key:
             score += 22
-            reasons.append("ETF theme matches detected capital direction")
+            reasons.append("ETF主题匹配当前资金方向")
         score += min(22.0, max(0.0, log10(max(candidate.amount or 1, 1) / 80_000_000) * 7 + 8))
         if (candidate.amount or 0) >= 300_000_000:
-            reasons.append("ETF liquidity is suitable for low-buy execution")
+            reasons.append("ETF成交额足够，适合低吸执行")
         if candidate.entry_bias in {"watch_low_buy", "pullback_watch"}:
             score += 16
-            reasons.append("ETF is closer to a low-buy zone than a chase zone")
+            reasons.append("ETF更接近低吸区，追高压力较低")
         elif candidate.entry_bias == "direction_hot_wait_pullback":
             score -= 8
-            reasons.append("ETF is hot; use as direction carrier but wait for pullback")
+            reasons.append("ETF短线偏热，可作方向载体但需等回落")
         elif candidate.entry_bias == "avoid_premium":
             score -= 18
-            reasons.append("ETF premium risk reduces tradability")
+            reasons.append("ETF溢价风险降低可交易性")
         premium = abs(candidate.premium_pct or 0.0)
         if premium <= 0.6:
             score += 9
-            reasons.append("premium/discount is controlled")
+            reasons.append("ETF溢折价处于可控区间")
         elif premium >= 1.5:
             score -= 12
         if candidate.volume_ratio is not None:
             if candidate.volume_ratio >= 1.4:
                 score += 8
-                reasons.append("ETF volume confirms attention")
+                reasons.append("ETF量能确认资金关注")
             elif candidate.volume_ratio < 0.75:
                 score -= 6
         if candidate.main_net_inflow_pct is not None:
@@ -576,7 +576,7 @@ def _capital_status(state: str) -> str:
         "weakening": "资金承接弱化",
         "watch_direction": "有资金迹象但证据不足",
         "weak_direction": "资金重心不明显",
-    }.get(state, "unknown")
+    }.get(state, "未知")
 
 
 def _trade_action(state: str, factors: dict[str, int]) -> str:
@@ -597,28 +597,28 @@ def _trade_action(state: str, factors: dict[str, int]) -> str:
 def _quant_evidence(factors: dict[str, int], concentration_pct: float | None, state: str) -> list[str]:
     evidence: list[str] = []
     if concentration_pct is not None and concentration_pct >= 8:
-        evidence.append("capital concentration is high in the full board universe")
+        evidence.append("全市场板块资金集中度较高")
     if factors["residency"] >= 65:
-        evidence.append("residency proxy is strong; needs multi-day confirmation")
+        evidence.append("资金驻留代理分较强，仍需多日确认")
     if factors["retention"] >= 65:
-        evidence.append("retention/acceptance proxy is strong")
+        evidence.append("资金承接代理分较强")
     if factors["etf_confirmation"] >= 65:
-        evidence.append("ETF carriers confirm the direction")
+        evidence.append("ETF载体对方向形成确认")
     if state == "hot_today":
-        evidence.append("first classify as hot today; require next-day acceptance before mainline")
+        evidence.append("先判定为当日热点，确认主线前需要次日承接")
     return evidence
 
 
 def _quant_risks(factors: dict[str, int], state: str, etfs: list[DiscoveryEtfCandidate]) -> list[str]:
     risks: list[str] = []
     if state == "overheated":
-        risks.append("direction is hot but low-buy readiness is poor; avoid chasing")
+        risks.append("方向偏热但低吸条件不足，避免追高")
     if factors["residency"] < 58 and factors["intraday_strength"] >= 70:
-        risks.append("single-day strength is not enough to prove capital residency")
+        risks.append("单日强度不足以证明资金驻留")
     if factors["flow_proxy"] < 45:
-        risks.append("flow proxy is weak or negative")
+        risks.append("资金流代理分偏弱或为负")
     if any(item.entry_bias == "avoid_premium" for item in etfs[:2]):
-        risks.append("one or more ETF carriers have premium risk")
+        risks.append("一个或多个ETF载体存在溢价风险")
     return risks
 
 
@@ -629,11 +629,11 @@ def _risk_watch(
 ) -> list[str]:
     watches: list[str] = []
     for stock in stocks[:3]:
-        watches.append(f"{stock.name}({stock.code}) breaks trend or prints heavy-volume long upper shadow")
+        watches.append(f"{stock.name}({stock.code}) 跌破趋势或放量长上影")
     for board in items[:2]:
-        watches.append(f"{board.name} board turnover falls out of leading group")
+        watches.append(f"{board.name} 板块成交额跌出前排")
     for etf in etfs[:2]:
-        watches.append(f"{etf.name}({etf.code}) trades below VWAP/MA10 with expanding volume")
+        watches.append(f"{etf.name}({etf.code}) 放量跌破VWAP/MA10")
     return watches[:8]
 
 
@@ -662,26 +662,26 @@ def _direction_evidence(
 ) -> list[str]:
     evidence: list[str] = []
     if len(items) >= 2:
-        evidence.append("multiple related boards confirm the direction")
+        evidence.append("多个相关板块共同确认方向")
     if breadth is not None and breadth >= 60:
-        evidence.append("board breadth is positive")
+        evidence.append("板块内部涨跌广度较好")
     if inflow > 0:
-        evidence.append("estimated board-level main flow is positive")
+        evidence.append("板块层面估算主力资金为净流入")
     if sum(item.amount or 0 for item in items[:3]) >= 5_000_000_000:
-        evidence.append("top boards have enough turnover capacity")
+        evidence.append("前排板块成交容量足够")
     if etfs:
-        evidence.append("tradable ETF carriers exist for this direction")
+        evidence.append("该方向存在可交易ETF载体")
     return evidence[:8]
 
 
 def _direction_risks(items: list[MarketBoardCandidate], breadth: float | None, inflow: float) -> list[str]:
     risks: list[str] = []
     if inflow < 0:
-        risks.append("estimated board-level main flow is negative")
+        risks.append("板块层面估算主力资金为净流出")
     if breadth is not None and breadth < 50:
-        risks.append("breadth is weak; rally may be narrow")
+        risks.append("板块内部广度偏弱，可能只是少数标的拉升")
     if any((item.change_pct or 0) >= 7 for item in items[:3]):
-        risks.append("top boards are hot; avoid chase entries")
+        risks.append("前排板块短线偏热，避免追高介入")
     return risks[:8]
 
 
@@ -700,55 +700,55 @@ def _board_score(row: dict[str, Any]) -> tuple[int, str, list[str], list[str]]:
 
     if change >= 5:
         score += 22
-        evidence.append("board gain is leading")
+        evidence.append("板块涨幅领先")
     elif change >= 2:
         score += 15
-        evidence.append("board gain is positive")
+        evidence.append("板块涨幅为正")
     elif change >= 0:
         score += 6
     else:
         score += max(-14.0, change * 3.0)
-        risk_flags.append("board price is weak")
+        risk_flags.append("板块价格走弱")
 
     score += min(18.0, max(0.0, log10(max(amount, 1) / 100_000_000) * 7 + 6))
     if amount >= 3_000_000_000:
-        evidence.append("board turnover has capacity")
+        evidence.append("板块成交额具备容量")
 
     if volume_ratio is not None:
         if volume_ratio >= 1.5:
             score += 8
-            evidence.append("board volume ratio confirms attention")
+            evidence.append("板块量比确认关注度")
         elif volume_ratio >= 1.1:
             score += 4
         elif volume_ratio < 0.75:
             score -= 5
-            risk_flags.append("board volume ratio is weak")
+            risk_flags.append("板块量比偏弱")
 
     if inflow > 1_000_000_000:
         score += 13
-        evidence.append("estimated main flow is strong")
+        evidence.append("估算主力资金流入较强")
     elif inflow > 100_000_000:
         score += 8
-        evidence.append("estimated main flow is positive")
+        evidence.append("估算主力资金为净流入")
     elif inflow < -1_000_000_000:
         score -= 12
-        risk_flags.append("estimated main flow is strongly negative")
+        risk_flags.append("估算主力资金明显净流出")
     elif inflow < -100_000_000:
         score -= 6
 
     if breadth is not None:
         if breadth >= 75:
             score += 12
-            evidence.append("board breadth is broad")
+            evidence.append("板块内部涨跌广度充分")
         elif breadth >= 60:
             score += 7
         elif breadth < 45:
             score -= 8
-            risk_flags.append("board breadth is weak")
+            risk_flags.append("板块内部涨跌广度偏弱")
 
     if leader_change is not None and leader_change >= 9:
         score += 4
-        evidence.append("leading stock is near daily limit")
+        evidence.append("领涨股接近涨停")
 
     clamped = _clamp(score)
     return clamped, _board_state(clamped), evidence[:8], risk_flags[:8]

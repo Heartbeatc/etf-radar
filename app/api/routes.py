@@ -6,6 +6,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from app.core.config import Settings
 from app.core.runtime import Runtime
 from app.domain.models import (
+    AiControlRequest,
+    AiStatus,
+    AiSummaryItem,
+    AiSummaryReport,
     AlertEvent,
     BacktestResult,
     BacktestSummary,
@@ -115,6 +119,25 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     @app.get("/api/v1/integrations", response_model=list[IntegrationStatus], dependencies=PROTECTED)
     async def integrations() -> list[IntegrationStatus]:
         return await runtime.integrations_status()
+
+    @app.get("/api/v1/ai/status", response_model=AiStatus, dependencies=PROTECTED)
+    async def ai_status() -> AiStatus:
+        return runtime.ai_status()
+
+    @app.put("/api/v1/ai/status", response_model=AiStatus, dependencies=PROTECTED)
+    async def set_ai_status(payload: AiControlRequest) -> AiStatus:
+        return runtime.set_ai_enabled(payload.enabled)
+
+    @app.get("/api/v1/ai/summaries", response_model=AiSummaryReport, dependencies=PROTECTED)
+    async def ai_summaries(limit: int = Query(default=10, ge=1, le=50)) -> AiSummaryReport:
+        return runtime.ai_summary_report(limit=limit)
+
+    @app.post("/api/v1/ai/summaries/{kind}", response_model=AiSummaryItem, dependencies=PROTECTED)
+    async def generate_ai_summary(kind: str, force: bool = Query(default=False)) -> AiSummaryItem:
+        item = await runtime.generate_ai_summary(kind=kind, force=force)
+        if item is None:
+            raise HTTPException(status_code=409, detail="AI summary is disabled, not configured, or daily call limit has been reached")
+        return item
 
     @app.get("/api/v1/snapshots", response_model=list[EtfSnapshot], dependencies=PROTECTED)
     async def snapshots() -> list[EtfSnapshot]:

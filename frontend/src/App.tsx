@@ -37,12 +37,17 @@ import {
   SafetyCertificateOutlined,
   ThunderboltOutlined,
   UserOutlined,
-  WarningOutlined
+  WarningOutlined,
+  BulbOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import type {
+  AiStatus,
+  AiSummaryItem,
+  AiSummaryKind,
+  AiSummaryReport,
   DataQualityItem,
   DataQualityResponse,
   DiscoveryDirection,
@@ -111,6 +116,18 @@ function App() {
     ({ signal }) => api.getIntegrations(sessionToken, signal),
     autoRefresh ? 30_000 : false
   );
+  const aiStatusQuery = useProtectedQuery(
+    ['ai-status', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getAiStatus(sessionToken, signal),
+    autoRefresh ? 60_000 : false
+  );
+  const aiSummariesQuery = useProtectedQuery(
+    ['ai-summaries', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getAiSummaries(sessionToken, signal),
+    autoRefresh ? 60_000 : false
+  );
 
   const clearSession = (openLogin = true) => {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -144,9 +161,29 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error].filter(Boolean);
+  const aiToggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.setAiEnabled(sessionToken, enabled),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['ai-status', sessionToken], data);
+      queryClient.invalidateQueries({ queryKey: ['ai-summaries', sessionToken] });
+      message.success(data.enabled ? 'AI已开启' : 'AI已关闭');
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const aiGenerateMutation = useMutation({
+    mutationFn: (kind: AiSummaryKind | string) => api.generateAiSummary(sessionToken, kind, true),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-status', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['ai-summaries', sessionToken] });
+      message.success('AI总结已更新');
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery, integrationsQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
 
   useEffect(() => {
@@ -220,6 +257,13 @@ function App() {
                 risk={riskQuery.data}
                 dataQuality={dataQualityQuery.data}
                 integrations={integrationsQuery.data ?? []}
+                aiStatus={aiStatusQuery.data}
+                aiSummaries={aiSummariesQuery.data}
+                onToggleAi={(enabled) => aiToggleMutation.mutate(enabled)}
+                togglingAi={aiToggleMutation.isPending}
+                onGenerateAi={(kind) => aiGenerateMutation.mutate(kind)}
+                generatingAiKind={aiGenerateMutation.variables ?? null}
+                generatingAi={aiGenerateMutation.isPending}
                 onForceDiscovery={() => forceDiscoveryMutation.mutate()}
                 forcingDiscovery={forceDiscoveryMutation.isPending}
                 errorMessage={protectedErrors.length ? getErrorMessage(protectedErrors[0]) : null}
@@ -293,13 +337,20 @@ interface DashboardProps {
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
+  aiStatus?: AiStatus;
+  aiSummaries?: AiSummaryReport;
+  onToggleAi: (enabled: boolean) => void;
+  togglingAi: boolean;
+  onGenerateAi: (kind: AiSummaryKind | string) => void;
+  generatingAiKind: AiSummaryKind | string | null;
+  generatingAi: boolean;
   onForceDiscovery: () => void;
   forcingDiscovery: boolean;
   errorMessage: string | null;
 }
 
 function Dashboard(props: DashboardProps) {
-  const { latest, discovery, marketFlow, risk, dataQuality, integrations, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const { latest, discovery, marketFlow, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
   const tabItems = [
@@ -327,6 +378,11 @@ function Dashboard(props: DashboardProps) {
       key: 'risk',
       label: <span><SafetyCertificateOutlined /> 风控</span>,
       children: <RiskTab risk={risk} />
+    },
+    {
+      key: 'ai',
+      label: <span><BulbOutlined /> AI总结</span>,
+      children: <AiSummaryTab status={aiStatus} report={aiSummaries} onToggle={onToggleAi} toggling={togglingAi} onGenerate={onGenerateAi} generatingKind={generatingAiKind} generating={generatingAi} />
     },
     {
       key: 'quality',
@@ -609,6 +665,62 @@ function RiskTab({ risk }: { risk?: RiskResponse }) {
         </div>
       </section>
     </Space>
+  );
+}
+
+function AiSummaryTab({ status, report, onToggle, toggling, onGenerate, generatingKind, generating }: { status?: AiStatus; report?: AiSummaryReport; onToggle: (enabled: boolean) => void; toggling: boolean; onGenerate: (kind: AiSummaryKind | string) => void; generatingKind: AiSummaryKind | string | null; generating: boolean }) {
+  const windows = status?.windows ?? [];
+  const summaries = report?.summaries ?? [];
+  return (
+    <Space direction="vertical" size="large" className="wide-stack">
+      <section className="panel">
+        <SectionHeader icon={<BulbOutlined />} title="AI状态" meta={status ? `${status.model} · ${status.calls_used_today}/${status.daily_call_limit}` : '-'} />
+        <div className="ai-control-row">
+          <Space wrap>
+            <Switch checked={Boolean(status?.enabled)} disabled={!status || toggling} loading={toggling} onChange={onToggle} checkedChildren="开启" unCheckedChildren="关闭" />
+            <Tag color={status?.configured ? 'green' : 'red'}>{status?.configured ? 'DeepSeek已配置' : '未配置Key'}</Tag>
+            <Tag>每日上限 {status?.daily_call_limit ?? '-'}</Tag>
+            <Tag>强制冷却 {status ? Math.round(status.force_cooldown_seconds / 60) : '-'} 分钟</Tag>
+          </Space>
+        </div>
+        {report?.warnings.map((warning) => <Alert key={warning} className="stack-alert" type="warning" showIcon message={warning} />)}
+        <div className="ai-window-grid">
+          {windows.map((window) => (
+            <article className="ai-window" key={window.kind}>
+              <div>
+                <Text strong>{window.title}</Text>
+                <Text className="muted">{window.start} - {window.end}</Text>
+              </div>
+              <Button size="small" onClick={() => onGenerate(window.kind)} loading={generating && generatingKind === window.kind} disabled={!status?.enabled || !status.configured}>生成</Button>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="panel">
+        <SectionHeader icon={<BulbOutlined />} title="时段总结" meta={report ? formatDateTime(report.generated_at) : '-'} />
+        {summaries.length ? (
+          <div className="ai-summary-list">
+            {summaries.map((item) => <AiSummaryCard key={`${item.kind}-${item.trading_date}`} item={item} />)}
+          </div>
+        ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无AI总结" />}
+      </section>
+    </Space>
+  );
+}
+
+function AiSummaryCard({ item }: { item: AiSummaryItem }) {
+  return (
+    <article className="ai-summary-card">
+      <div className="ai-summary-head">
+        <div>
+          <Text strong>{item.title}</Text>
+          <Text className="muted">{item.trading_date} · {item.source_data_time ? `行情 ${formatDateTime(item.source_data_time)}` : `生成 ${formatDateTime(item.generated_at)}`}</Text>
+        </div>
+        <Tag color={item.status === 'ok' ? 'blue' : 'red'}>{item.status === 'ok' ? '已生成' : '异常'}</Tag>
+      </div>
+      <p className="ai-summary-text">{item.summary}</p>
+      {item.error && <Text className="muted">{item.error}</Text>}
+    </article>
   );
 }
 

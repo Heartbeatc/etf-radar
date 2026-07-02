@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     discovery_min_amount: float = Field(default=50_000_000, ge=1_000_000)
     discovery_max_directions: int = Field(default=8, ge=3, le=20)
 
+    ai_enabled: bool = False
+    ai_summary_daily_call_limit: int = Field(default=4, ge=0, le=20)
+    ai_summary_force_cooldown_seconds: int = Field(default=1800, ge=300, le=14_400)
+    ai_summary_check_interval_seconds: int = Field(default=60, ge=30, le=600)
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"

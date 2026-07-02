@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -14,8 +15,9 @@ from app.adapters.infra import PostgresInfra, RedisInfra
 from app.adapters.store import Store
 from app.core.config import Settings
 from app.core.market import market_status
-from app.domain.models import DiscoveryResponse, IntegrationStatus, LatestResponse, MarketFlowResponse, Position, SourceStatus, TradePlan
+from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, IntegrationStatus, LatestResponse, MarketFlowResponse, Position, SourceStatus, TradePlan
 from app.services.ai import AIAnalyst
+from app.services.ai_summary import build_ai_context, due_summary_kinds, make_summary_item, summary_title, summary_windows_payload, trading_date
 from app.services.alerts import AlertManager
 from app.services.discovery import build_discovery_report
 from app.services.market_flow import build_market_flow_report
@@ -38,6 +40,7 @@ class Runtime:
         self.postgres = PostgresInfra(settings)
         self.redis = RedisInfra(settings)
         self._task: asyncio.Task | None = None
+        self._ai_task: asyncio.Task | None = None
         self._last_error: str | None = None
         self._last_warning: str | None = None
         self._integration_errors: dict[str, str | None] = {"kafka": None, "clickhouse": None, "postgres": None, "redis": None}
@@ -46,6 +49,7 @@ class Runtime:
 
     async def start(self) -> None:
         await self._setup_integrations()
+        self._ai_task = asyncio.create_task(self._ai_summary_loop())
         if not self.settings.api_polling_enabled:
             self._last_warning = None
             return
@@ -63,6 +67,10 @@ class Runtime:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        if self._ai_task:
+            self._ai_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._ai_task
         self.event_bus.close()
         await self.clickhouse.close()
         await self.redis.close()
@@ -91,6 +99,14 @@ class Runtime:
             self._integration_errors["redis"] = None if redis_ok else redis_error
         except Exception as exc:
             self._integration_errors["redis"] = str(exc)[:300]
+
+    async def _ai_summary_loop(self) -> None:
+        while True:
+            try:
+                await self.generate_due_ai_summaries()
+            except Exception:
+                pass
+            await asyncio.sleep(self.settings.ai_summary_check_interval_seconds)
 
     async def _loop(self) -> None:
         tick = 1
@@ -173,7 +189,7 @@ class Runtime:
         return report
 
     async def latest(self) -> LatestResponse:
-        plans = await self.plans()
+        plans = self.build_rule_plans()
         snapshots = self.store.latest_snapshots()
         benchmarks = [snapshots[code] for code in self.settings.benchmark_code_list if code in snapshots]
         ages = [(datetime.now(timezone.utc) - item.fetched_at).total_seconds() for item in snapshots.values()]
@@ -193,11 +209,7 @@ class Runtime:
         )
 
     async def plans(self) -> list[TradePlan]:
-        plans = self.build_rule_plans()
-        summaries = await self.ai.explain(plans)
-        for plan in plans:
-            plan.ai_summary = summaries.get(plan.code)
-        return plans
+        return self.build_rule_plans()
 
     def build_rule_plans(self) -> list[TradePlan]:
         return build_rule_plans(self.settings, self.store)
@@ -224,6 +236,102 @@ class Runtime:
                 stale_seconds=self.settings.data_stale_seconds,
             )
         )
+
+    def ai_enabled(self) -> bool:
+        return self.store.get_bool_setting("ai_enabled", self.settings.ai_enabled)
+
+    def set_ai_enabled(self, enabled: bool) -> AiStatus:
+        self.store.set_bool_setting("ai_enabled", enabled)
+        return self.ai_status()
+
+    def ai_status(self) -> AiStatus:
+        date = trading_date()
+        return AiStatus(
+            enabled=self.ai_enabled(),
+            configured=bool(self.settings.deepseek_api_key),
+            model=self.settings.deepseek_model,
+            daily_call_limit=self.settings.ai_summary_daily_call_limit,
+            calls_used_today=self.store.ai_call_count(date),
+            force_cooldown_seconds=self.settings.ai_summary_force_cooldown_seconds,
+            check_interval_seconds=self.settings.ai_summary_check_interval_seconds,
+            windows=summary_windows_payload(),
+        )
+
+    def ai_summary_report(self, limit: int = 10) -> AiSummaryReport:
+        warnings: list[str] = []
+        if not self.ai_enabled():
+            warnings.append("AI summaries are disabled")
+        if not self.settings.deepseek_api_key:
+            warnings.append("DeepSeek API key is not configured")
+        return AiSummaryReport(
+            generated_at=datetime.now(timezone.utc),
+            status=self.ai_status(),
+            summaries=self.store.latest_ai_summaries(limit=limit),
+            warnings=warnings,
+        )
+
+    async def generate_due_ai_summaries(self) -> list[AiSummaryItem]:
+        if not self.ai_enabled() or not self.settings.deepseek_api_key:
+            return []
+        result: list[AiSummaryItem] = []
+        for kind in due_summary_kinds():
+            item = await self.generate_ai_summary(kind=kind, force=False)
+            if item is not None:
+                result.append(item)
+        return result
+
+    async def generate_ai_summary(self, kind: str, force: bool = False) -> AiSummaryItem | None:
+        if kind not in {"opening_auction", "midday", "closing"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported AI summary kind: {kind}")
+        date = trading_date()
+        existing = self.store.ai_summary_for(kind, date)
+        if existing and not force:
+            return existing
+        if not self.ai_enabled():
+            return existing
+        if not self.settings.deepseek_api_key:
+            return existing
+        if force and existing:
+            age = (datetime.now(timezone.utc) - existing.generated_at).total_seconds()
+            if age < self.settings.ai_summary_force_cooldown_seconds:
+                return existing
+        if self.store.ai_call_count(date) >= self.settings.ai_summary_daily_call_limit:
+            return existing
+
+        plans = self.build_rule_plans()
+        snapshots = self.store.latest_snapshots()
+        market_flow: MarketFlowResponse | None = None
+        try:
+            market_flow = await self.market_flow(force=False)
+        except Exception:
+            market_flow = None
+        context, source_data_time = build_ai_context(self.settings, plans, market_flow, snapshots)
+        try:
+            summary_text = await self.ai.summarize_market(kind, context)
+            item = make_summary_item(
+                kind=kind,
+                trading_date_value=date,
+                model=self.settings.deepseek_model,
+                summary=summary_text,
+                source_data_time=source_data_time,
+                payload={"context": context},
+            )
+            self.store.log_ai_call("market_summary", kind, date, "ok")
+            return self.store.save_ai_summary(item)
+        except Exception as exc:
+            error = str(exc)[:300]
+            self.store.log_ai_call("market_summary", kind, date, "error", error=error)
+            item = make_summary_item(
+                kind=kind,
+                trading_date_value=date,
+                model=self.settings.deepseek_model,
+                summary=f"{summary_title(kind)}生成失败，继续以规则引擎信号为准。",
+                source_data_time=source_data_time,
+                status="error",
+                error=error,
+                payload={"context": context},
+            )
+            return self.store.save_ai_summary(item)
 
     def source_status(self) -> list[SourceStatus]:
         return source_status_for(self.settings, self.store.latest_snapshots())

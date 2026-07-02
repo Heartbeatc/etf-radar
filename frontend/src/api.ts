@@ -1,4 +1,8 @@
 import type {
+  AiStatus,
+  AiSummaryItem,
+  AiSummaryKind,
+  AiSummaryReport,
   DataQualityResponse,
   DiscoveryResponse,
   HealthResponse,
@@ -88,5 +92,13 @@ export const api = {
   getDataQuality: (token: string, signal?: AbortSignal) =>
     requestJson<DataQualityResponse>('/api/v1/data-quality', { token, signal }),
   getIntegrations: (token: string, signal?: AbortSignal) =>
-    requestJson<IntegrationStatus[]>('/api/v1/integrations', { token, signal })
+    requestJson<IntegrationStatus[]>('/api/v1/integrations', { token, signal }),
+  getAiStatus: (token: string, signal?: AbortSignal) =>
+    requestJson<AiStatus>('/api/v1/ai/status', { token, signal }),
+  setAiEnabled: (token: string, enabled: boolean) =>
+    requestJson<AiStatus>('/api/v1/ai/status', { method: 'PUT', token, body: { enabled } }),
+  getAiSummaries: (token: string, signal?: AbortSignal) =>
+    requestJson<AiSummaryReport>('/api/v1/ai/summaries', { token, signal }),
+  generateAiSummary: (token: string, kind: AiSummaryKind | string, force = true) =>
+    requestJson<AiSummaryItem>(`/api/v1/ai/summaries/${kind}${force ? '?force=true' : ''}`, { method: 'POST', token })
 };

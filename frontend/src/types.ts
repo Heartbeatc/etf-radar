@@ -281,6 +281,39 @@ export interface IntegrationStatus {
   last_error: string | null;
 }
 
+export type AiSummaryKind = 'opening_auction' | 'midday' | 'closing';
+
+export interface AiStatus {
+  enabled: boolean;
+  configured: boolean;
+  model: string;
+  daily_call_limit: number;
+  calls_used_today: number;
+  force_cooldown_seconds: number;
+  check_interval_seconds: number;
+  windows: Array<{ kind: AiSummaryKind | string; title: string; start: string; end: string }>;
+}
+
+export interface AiSummaryItem {
+  kind: AiSummaryKind | string;
+  title: string;
+  trading_date: string;
+  generated_at: string;
+  source_data_time: string | null;
+  model: string;
+  status: string;
+  summary: string;
+  error: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface AiSummaryReport {
+  generated_at: string;
+  status: AiStatus;
+  summaries: AiSummaryItem[];
+  warnings: string[];
+}
+
 
 export interface WebLoginResponse {
   access_token: string;

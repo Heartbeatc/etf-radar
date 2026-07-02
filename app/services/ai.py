@@ -54,6 +54,41 @@ class AIAnalyst:
 
         return result
 
+    async def summarize_market(self, kind: str, context: dict) -> str:
+        if not self.settings.deepseek_api_key:
+            return _fallback_market_summary(kind, context)
+        payload = {
+            "model": self.settings.deepseek_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是A股场内ETF交易辅助系统的风控型分析员。"
+                        "只基于输入数据做盘面总结，不承诺收益，不给绝对买卖命令。"
+                        "输出中文，结构清晰，控制在220字以内。必须包含：市场情绪、主线/候选方向、固定池ETF动作倾向、风险、下一步观察。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({"summary_kind": kind, "context": context}, ensure_ascii=False),
+                },
+            ],
+            "temperature": 0.1,
+            "max_tokens": 420,
+        }
+        endpoint = _chat_endpoint(self.settings.deepseek_base_url)
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.deepseek_timeout_seconds) as client:
+                response = await client.post(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                return str(response.json()["choices"][0]["message"]["content"]).strip()
+        except Exception:
+            return _fallback_market_summary(kind, context)
+
     async def _request_summaries(self, plans: list[TradePlan]) -> dict[str, str]:
         payload = {
             "model": self.settings.deepseek_model,
@@ -142,6 +177,24 @@ def _dict_value(value: object, key: str) -> object:
 
 def _bucket(score: int) -> int:
     return score // 10
+
+
+def _fallback_market_summary(kind: str, context: dict) -> str:
+    titles = {
+        "opening_auction": "早盘竞价/开盘情绪",
+        "midday": "午间复盘",
+        "closing": "尾盘/收盘总结",
+    }
+    directions = context.get("market_directions") or []
+    plans = context.get("fixed_pool") or []
+    top = directions[0] if directions else {}
+    strongest = top.get("direction_label") or "暂无明确方向"
+    top_state = top.get("state") or "观察"
+    plan_text = "；".join(
+        f"{item.get('code')} {item.get('signal')} 低吸{item.get('low_buy_score')} 风险{item.get('risk_score')}"
+        for item in plans[:3]
+    ) or "固定池暂无有效信号"
+    return f"{titles.get(kind, kind)}：市场最强方向为{strongest}，状态{top_state}。固定池：{plan_text}。仅按规则观察低吸、止盈和防守线，不追高。"
 
 
 def _fallback_summary(plan: TradePlan) -> str:

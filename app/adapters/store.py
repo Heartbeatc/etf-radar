@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, SignalRecord, SourceStatus, TradePlan
+from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, SignalRecord, SourceStatus, TradePlan
 
 
 class Store:
@@ -105,6 +105,38 @@ class Store:
                     ok integer not null,
                     payload text not null
                 );
+
+                create table if not exists runtime_settings (
+                    key text primary key,
+                    value text not null,
+                    updated_at text not null
+                );
+
+                create table if not exists ai_summaries (
+                    id integer primary key autoincrement,
+                    kind text not null,
+                    trading_date text not null,
+                    generated_at text not null,
+                    source_data_time text,
+                    model text not null,
+                    status text not null,
+                    summary text not null,
+                    error text,
+                    payload text not null,
+                    unique(kind, trading_date)
+                );
+                create index if not exists idx_ai_summaries_time on ai_summaries(generated_at desc);
+
+                create table if not exists ai_call_log (
+                    id integer primary key autoincrement,
+                    purpose text not null,
+                    kind text not null,
+                    trading_date text not null,
+                    called_at text not null,
+                    status text not null,
+                    error text
+                );
+                create index if not exists idx_ai_call_log_date on ai_call_log(trading_date, called_at desc);
                 """
             )
             conn.execute(
@@ -271,6 +303,83 @@ class Store:
             rows = conn.execute(sql, params).fetchall()
         return [_signal_record(row) for row in rows]
 
+    def get_bool_setting(self, key: str, default: bool) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("select value from runtime_settings where key = ?", (key,)).fetchone()
+        if not row:
+            return default
+        return str(row["value"]).strip().lower() in {"1", "true", "yes", "on"}
+
+    def set_bool_setting(self, key: str, value: bool) -> None:
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into runtime_settings(key, value, updated_at) values (?, ?, ?)
+                on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, "true" if value else "false", updated_at),
+            )
+
+    def save_ai_summary(self, summary: AiSummaryItem) -> AiSummaryItem:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into ai_summaries(kind, trading_date, generated_at, source_data_time, model, status, summary, error, payload)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(kind, trading_date) do update set
+                    generated_at = excluded.generated_at,
+                    source_data_time = excluded.source_data_time,
+                    model = excluded.model,
+                    status = excluded.status,
+                    summary = excluded.summary,
+                    error = excluded.error,
+                    payload = excluded.payload
+                """,
+                (
+                    summary.kind,
+                    summary.trading_date,
+                    summary.generated_at.isoformat(),
+                    summary.source_data_time.isoformat() if summary.source_data_time else None,
+                    summary.model,
+                    summary.status,
+                    summary.summary,
+                    summary.error,
+                    json.dumps(summary.payload, ensure_ascii=False),
+                ),
+            )
+        return summary
+
+    def latest_ai_summaries(self, limit: int = 20) -> list[AiSummaryItem]:
+        limit = max(1, min(limit, 100))
+        with self._connect() as conn:
+            rows = conn.execute("select * from ai_summaries order by generated_at desc limit ?", (limit,)).fetchall()
+        return [_ai_summary_item(row) for row in rows]
+
+    def ai_summary_for(self, kind: str, trading_date: str) -> AiSummaryItem | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "select * from ai_summaries where kind = ? and trading_date = ?",
+                (kind, trading_date),
+            ).fetchone()
+        return _ai_summary_item(row) if row else None
+
+    def log_ai_call(self, purpose: str, kind: str, trading_date: str, status: str, error: str | None = None) -> None:
+        called_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "insert into ai_call_log(purpose, kind, trading_date, called_at, status, error) values (?, ?, ?, ?, ?, ?)",
+                (purpose, kind, trading_date, called_at, status, error),
+            )
+            conn.execute(
+                "delete from ai_call_log where id not in (select id from ai_call_log order by called_at desc limit 1000)"
+            )
+
+    def ai_call_count(self, trading_date: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute("select count(*) as count from ai_call_log where trading_date = ?", (trading_date,)).fetchone()
+        return int(row["count"] if row else 0)
+
     def save_source_status(self, statuses: list[SourceStatus]) -> None:
         checked_at = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connect() as conn:
@@ -384,7 +493,29 @@ def _signal_record(row: sqlite3.Row) -> SignalRecord:
     )
 
 
-def _alert_event(row: sqlite3.Row) -> AlertEvent:
+def _ai_summary_item(row: sqlite3.Row) -> AiSummaryItem:
+    return AiSummaryItem(
+        kind=row["kind"],
+        title=_ai_summary_title(row["kind"]),
+        trading_date=row["trading_date"],
+        generated_at=datetime.fromisoformat(row["generated_at"]),
+        source_data_time=datetime.fromisoformat(row["source_data_time"]) if row["source_data_time"] else None,
+        model=row["model"],
+        status=row["status"],
+        summary=row["summary"],
+        error=row["error"],
+        payload=json.loads(row["payload"]),
+    )
+
+
+def _ai_summary_title(kind: str) -> str:
+    return {
+        "opening_auction": "早盘竞价/开盘情绪",
+        "midday": "午间复盘",
+        "closing": "尾盘/收盘总结",
+    }.get(kind, kind)
+
+
     return AlertEvent(
         id=row["id"],
         code=row["code"],

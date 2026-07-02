@@ -118,6 +118,41 @@ class IntegrationStatus(BaseModel):
     last_error: str | None = None
 
 
+class AiControlRequest(BaseModel):
+    enabled: bool
+
+
+class AiSummaryItem(BaseModel):
+    kind: str
+    title: str
+    trading_date: str
+    generated_at: datetime
+    source_data_time: datetime | None = None
+    model: str
+    status: str = "ok"
+    summary: str
+    error: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AiStatus(BaseModel):
+    enabled: bool
+    configured: bool
+    model: str
+    daily_call_limit: int
+    calls_used_today: int
+    force_cooldown_seconds: int
+    check_interval_seconds: int
+    windows: list[dict[str, str]]
+
+
+class AiSummaryReport(BaseModel):
+    generated_at: datetime
+    status: AiStatus
+    summaries: list[AiSummaryItem]
+    warnings: list[str] = Field(default_factory=list)
+
+
 class SourceStatus(BaseModel):
     code: str
     name: str | None = None

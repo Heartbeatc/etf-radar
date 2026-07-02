@@ -203,7 +203,7 @@ function App() {
           <span className="brand-mark"><LineChartOutlined /></span>
           <div>
             <Title level={4} className="brand-title">ETF Radar</Title>
-            <Text className="brand-subtitle">量化框架</Text>
+            <Text className="brand-subtitle">交易决策台</Text>
           </div>
         </div>
         <Space size="small" wrap className="top-actions">
@@ -312,47 +312,51 @@ interface QuantConsoleProps {
 
 function QuantConsole(props: QuantConsoleProps) {
   const primary = useMemo(() => pickPrimaryExecution(props.framework, props.positions), [props.framework, props.positions]);
+  const focusItems = useMemo(() => [...(props.framework?.execution_plan ?? [])].sort((a, b) => executionRank(a) - executionRank(b)).slice(0, 3), [props.framework]);
   const selectedUniverse = (props.framework?.universe ?? []).filter((item) => item.selected);
   const heldCodes = new Set(props.positions.map((item) => item.code));
   const positionActions = (props.framework?.final_actions ?? []).filter((item) => item.has_position || heldCodes.has(item.code));
   const warnings = [props.errorMessage, props.health?.last_warning, ...(props.framework?.warnings ?? [])]
     .filter((item): item is string => Boolean(item))
-    .slice(0, 4);
+    .slice(0, 3);
 
   return (
-    <main className="decision-console quant-console">
+    <main className="trading-console">
       {warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
 
-      <section className="hero-panel quant-hero">
-        <div className="hero-copy">
-          <Text className="eyebrow">当前量化结论</Text>
+      <section className={`decision-hero side-${primary.side.toLowerCase()}`}>
+        <div className="decision-copy">
+          <Text className="eyebrow">当前动作</Text>
           <h1>{frameworkConclusion(props.framework, primary)}</h1>
-          <Space size={[6, 6]} wrap>
-            <Tag color={primary.side === 'BUY' ? 'green' : primary.side === 'SELL' ? 'red' : 'orange'}>动作 {actionLabel(primary.action)}</Tag>
+          <div className="status-line">
+            <ActionTag action={primary.action} side={primary.side} />
             <Tag color={evidenceColor(props.framework?.validation.evidence_strength)}>证据 {evidenceLabel(props.framework?.validation.evidence_strength)}</Tag>
-            <Tag color={props.framework?.validation.live_trading_ready ? 'green' : 'red'}>{props.framework?.validation.live_trading_ready ? '可实盘' : '研究级'}</Tag>
-            <Tag>更新 {formatDateTime(props.framework?.generated_at)}</Tag>
-          </Space>
+            <Tag color={props.framework?.validation.live_trading_ready ? 'green' : 'orange'}>{props.framework?.validation.live_trading_ready ? '可实盘' : '研究级'}</Tag>
+            <Text className="muted">{frameworkStageLabel(props.framework)} · {formatDateTime(props.framework?.generated_at)}</Text>
+          </div>
         </div>
-        <div className="hero-command">
-          <Text className="eyebrow">执行指令</Text>
-          <div className="command-action"><ActionTag action={primary.action} side={primary.side} /></div>
+        <div className="decision-ticket">
+          <Text className="ticket-label">核心标的</Text>
+          <strong>{primary.code ?? '-'}</strong>
           <Text>{primary.note}</Text>
         </div>
       </section>
 
-      <section className="grid two-columns wide-left">
-        <ExecutionPanel items={props.framework?.execution_plan ?? []} primaryCode={primary.code} />
-        <ValidationPanel framework={props.framework} onRefresh={props.onRefreshFramework} loading={props.refreshingFramework} />
+      <section className="focus-board">
+        <div className="section-title-row">
+          <div>
+            <Text className="eyebrow">交易候选</Text>
+            <h2>今天只看这 3 个</h2>
+          </div>
+          <Button size="small" icon={<ReloadOutlined />} loading={props.refreshingFramework} onClick={props.onRefreshFramework}>刷新</Button>
+        </div>
+        <div className="trade-grid">
+          {focusItems.map((item, index) => <TradeFocusCard key={item.code} item={item} index={index} primary={item.code === primary.code} />)}
+          {!focusItems.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无交易候选" />}
+        </div>
       </section>
 
-      <section className="grid two-columns">
-        <PortfolioRiskPanel targets={props.framework?.portfolio_targets ?? []} risks={props.framework?.risk_adjustments ?? []} />
-        <UniversePanel items={selectedUniverse} allItems={props.framework?.universe ?? []} />
-      </section>
-
-      <section className="grid two-columns wide-left">
-        <EvidencePanel features={props.framework?.features ?? []} insights={props.framework?.insights ?? []} />
+      <section className="support-grid">
         <PositionPanel
           positions={props.positions}
           actions={positionActions}
@@ -364,50 +368,51 @@ function QuantConsole(props: QuantConsoleProps) {
           deleting={props.deletingPosition}
           deletingCode={props.deletingCode}
         />
+        <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
       </section>
 
-      <section className="grid two-columns">
-        <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
-        <SystemPanel health={props.health} session={props.session} framework={props.framework} integrations={props.integrations} />
-      </section>
+      <details className="detail-drawer">
+        <summary>展开证据、资产池和系统状态</summary>
+        <div className="detail-grid">
+          <EvidencePanel features={props.framework?.features ?? []} insights={props.framework?.insights ?? []} />
+          <PortfolioRiskPanel targets={props.framework?.portfolio_targets ?? []} risks={props.framework?.risk_adjustments ?? []} />
+          <UniversePanel items={selectedUniverse} allItems={props.framework?.universe ?? []} />
+          <ValidationPanel framework={props.framework} onRefresh={props.onRefreshFramework} loading={props.refreshingFramework} />
+          <SystemPanel health={props.health} session={props.session} framework={props.framework} integrations={props.integrations} />
+        </div>
+      </details>
     </main>
   );
 }
 
-function ExecutionPanel({ items, primaryCode }: { items: QuantExecutionAdvice[]; primaryCode?: string | null }) {
-  const sorted = [...items].sort((a, b) => executionRank(a) - executionRank(b));
+function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; index: number; primary: boolean }) {
+  const role = index === 0 ? '主 ETF 1' : index === 1 ? '主 ETF 2' : '备选 ETF';
+  const blockers = item.blockers.slice(0, 2);
+  const notes = item.notes.slice(0, 2);
   return (
-    <Panel title="执行计划" icon={<ThunderboltOutlined />} meta={`${items.length} 个标的`}>
-      <div className="execution-list">
-        {sorted.map((item) => <ExecutionCard key={item.code} item={item} primary={item.code === primaryCode} />)}
-        {!sorted.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行计划" />}
+    <article className={`trade-card side-${item.side.toLowerCase()} ${primary ? 'primary' : ''}`}>
+      <div className="trade-card-head">
+        <Text className="ticket-label">{role}</Text>
+        <ActionTag action={item.action} side={item.side} />
       </div>
-    </Panel>
+      <div className="trade-identity">
+        <strong>{item.name}</strong>
+        <Text className="muted">{item.code} · {item.order_style}</Text>
+      </div>
+      <div className="trade-metrics">
+        <DecisionMetric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
+        <DecisionMetric label="目标仓位" value={formatPercentNumber(item.target_weight_pct)} />
+        <DecisionMetric label="止盈" value={formatPrice(item.take_profit_price)} />
+        <DecisionMetric label="防守" value={formatPrice(item.stop_price)} />
+      </div>
+      <p className={blockers.length ? 'trade-reason risk-text' : 'trade-reason'}>{blockers[0] ?? notes[0] ?? '等待下一轮信号确认。'}</p>
+      {notes[1] && <Text className="muted trade-extra">{notes[1]}</Text>}
+    </article>
   );
 }
 
-function ExecutionCard({ item, primary }: { item: QuantExecutionAdvice; primary: boolean }) {
-  return (
-    <article className={primary ? 'execution-card primary' : 'execution-card'}>
-      <div className="card-head">
-        <div>
-          <Text strong>{item.name}</Text>
-          <Text className="muted">{item.code} · {item.order_style}</Text>
-        </div>
-        <ActionTag action={item.action} side={item.side} />
-      </div>
-      <div className="metric-grid execution-metrics">
-        <Metric label="目标仓位" value={formatPercentNumber(item.target_weight_pct)} />
-        <Metric label="仓位变化" value={formatDelta(item.position_delta_pct)} />
-        <Metric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
-        <Metric label="回避价" value={formatPrice(item.avoid_above)} />
-        <Metric label="止盈" value={formatPrice(item.take_profit_price)} />
-        <Metric label="止损/防守" value={formatPrice(item.stop_price)} />
-      </div>
-      <TagList items={item.notes.slice(0, 4)} color="blue" />
-      <TagList items={item.blockers.slice(0, 4)} color="red" empty="没有执行阻断" />
-    </article>
-  );
+function DecisionMetric({ label, value }: { label: string; value: ReactNode }) {
+  return <div className="decision-metric"><Text>{label}</Text><strong>{value}</strong></div>;
 }
 
 function ValidationPanel({ framework, onRefresh, loading }: { framework?: QuantFrameworkResponse; onRefresh: () => void; loading: boolean }) {
@@ -638,10 +643,6 @@ function ScoreBox({ label, value }: { label: string; value: number | null }) {
   return <div className="score-box"><Text className="metric-label">{label}</Text><strong style={{ color: value == null ? '#667085' : scoreColor(value) }}>{value == null ? '-' : value.toFixed(0)}</strong></div>;
 }
 
-function Metric({ label, value }: { label: string; value: ReactNode }) {
-  return <div className="metric"><Text className="metric-label">{label}</Text><div className="metric-value">{value}</div></div>;
-}
-
 function StatusMetric({ icon, label, value, color = 'default' }: { icon: ReactNode; label: string; value: string; color?: string }) {
   return <div className="status-metric"><span>{icon}</span><Text className="metric-label">{label}</Text><Tag color={color}>{value}</Tag></div>;
 }
@@ -690,6 +691,14 @@ function pickPrimaryExecution(framework?: QuantFrameworkResponse, positions: Pos
     };
   }
   return { code: null, action: 'WAIT', side: 'WAIT', note: positions.length ? '等待持仓风控信号。' : '空仓等待低吸触发。' };
+}
+
+function frameworkStageLabel(framework?: QuantFrameworkResponse): string {
+  if (!framework) return '无数据';
+  if (framework.validation.live_trading_ready) return '可执行';
+  if (framework.validation.blockers.length) return '验证未通过';
+  if (framework.validation.evidence_strength === 'medium-low') return '研究级验证中';
+  return '观察中';
 }
 
 function frameworkConclusion(framework: QuantFrameworkResponse | undefined, primary: ReturnType<typeof pickPrimaryExecution>): string {

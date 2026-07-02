@@ -438,7 +438,7 @@ function OverviewTab({ latest, discovery, marketFlow, risk, dataQuality, onForce
         </Col>
         <Col xs={24} xl={10}>
           <section className="panel">
-            <SectionHeader icon={<DatabaseOutlined />} title="数据质量" meta={dataQuality ? `${dataQuality.overall_score.toFixed(0)}分` : '-'} />
+            <SectionHeader icon={<DatabaseOutlined />} title="数据质量" meta={qualityGateMeta(dataQuality)} />
             <QualitySummary dataQuality={dataQuality} />
           </section>
         </Col>
@@ -729,8 +729,8 @@ function QualityTab({ dataQuality, integrations }: { dataQuality?: DataQualityRe
     <Row gutter={[16, 16]}>
       <Col xs={24} xl={16}>
         <section className="panel">
-          <SectionHeader icon={<DatabaseOutlined />} title="数据源" meta={dataQuality ? formatDateTime(dataQuality.generated_at) : '-'} />
-          <QualityTable data={dataQuality?.items ?? []} />
+          <SectionHeader icon={<DatabaseOutlined />} title="数据质量闸门" meta={qualityGateMeta(dataQuality)} />
+          <QualityGatePanel dataQuality={dataQuality} />
         </section>
       </Col>
       <Col xs={24} xl={8}>
@@ -748,6 +748,7 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
   const firstMain = discovery?.main_candidates?.[0];
   const secondMain = discovery?.main_candidates?.[1];
   const integrationOk = integrations.filter((item) => item.ok).length;
+  const qualityGate = getQualityGate(dataQuality);
 
   return (
     <Row gutter={[12, 12]} className="metric-row">
@@ -771,8 +772,8 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
       </Col>
       <Col xs={24} sm={12} lg={6}>
         <Card className="metric-card">
-          <Statistic title="风险/质量" value={`${risk?.risk_budget_state ?? '-'} / ${dataQuality?.overall_score?.toFixed(0) ?? '-'}`} prefix={<SafetyCertificateOutlined />} valueStyle={{ fontSize: 20 }} />
-          <Text className="metric-foot">基础设施 {integrationOk}/{integrations.length || 0}</Text>
+          <Statistic title="风险/数据" value={`${risk?.risk_budget_state ?? '-'} / ${qualityGate.label}`} prefix={<SafetyCertificateOutlined />} valueStyle={{ fontSize: 20 }} />
+          <Text className="metric-foot">数据状态 {qualityGate.label} · 基础设施 {integrationOk}/{integrations.length || 0}</Text>
         </Card>
       </Col>
     </Row>
@@ -1304,26 +1305,209 @@ function RiskList({ risk }: { risk?: RiskResponse }) {
   );
 }
 
+type QualityGateStatus = 'trusted' | 'caution' | 'blocked' | 'missing';
+type QualityBadgeStatus = 'success' | 'warning' | 'error' | 'default';
+
+interface QualityGateView {
+  status: QualityGateStatus;
+  label: string;
+  detail: string;
+  scoreText: string;
+  tagColor: string;
+  badgeStatus: QualityBadgeStatus;
+  okCount: number;
+  totalCount: number;
+  problemItems: DataQualityItem[];
+}
+
 function QualitySummary({ dataQuality }: { dataQuality?: DataQualityResponse }) {
   if (!dataQuality) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />;
   }
 
+  const gate = getQualityGate(dataQuality);
+  const hasIssues = gate.problemItems.length > 0 || dataQuality.warnings.length > 0;
+
   return (
     <Space direction="vertical" size="middle" className="wide-stack">
-      <Progress percent={clamp(dataQuality.overall_score)} strokeColor={scoreColor(dataQuality.overall_score)} />
-      <div className="quality-grid">
-        {dataQuality.items.map((item) => (
-          <div className="quality-item" key={item.code}>
-            <Badge status={item.ok ? 'success' : 'error'} />
-            <Text strong>{item.code}</Text>
-            <Text className="muted">{item.source}</Text>
-            <Text>{item.score}</Text>
+      <div className={`quality-gate compact quality-gate-${gate.status}`}>
+        <div className="quality-gate-main">
+          <Badge status={gate.badgeStatus} />
+          <div>
+            <Text strong className="quality-gate-title">{gate.label}</Text>
+            <Text className="quality-gate-detail">{gate.detail}</Text>
           </div>
-        ))}
+        </div>
+        <Tag color={gate.tagColor}>{gate.okCount}/{gate.totalCount}可用</Tag>
       </div>
+      {hasIssues ? <QualityIssueList dataQuality={dataQuality} compact /> : <Text className="quality-clean-note">全部检查通过，交易信号未被数据质量阻断。</Text>}
     </Space>
   );
+}
+
+function QualityGatePanel({ dataQuality }: { dataQuality?: DataQualityResponse }) {
+  if (!dataQuality) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据质量" />;
+  }
+
+  const gate = getQualityGate(dataQuality);
+  const hasIssues = gate.problemItems.length > 0 || dataQuality.warnings.length > 0;
+
+  return (
+    <Space direction="vertical" size="middle" className="wide-stack">
+      <div className={`quality-gate quality-gate-${gate.status}`}>
+        <div className="quality-gate-main">
+          <Badge status={gate.badgeStatus} />
+          <div>
+            <Text strong className="quality-gate-title">{gate.label}</Text>
+            <Text className="quality-gate-detail">{gate.detail}</Text>
+          </div>
+        </div>
+        <div className="quality-gate-score">
+          <Text className="metric-label">内部评分</Text>
+          <Text strong>{gate.scoreText}</Text>
+        </div>
+      </div>
+      <div className="quality-gate-meta">
+        <MetricLabel label="检查标的" value={`${gate.totalCount} 个`} />
+        <MetricLabel label="可用标的" value={`${gate.okCount}/${gate.totalCount}`} />
+        <MetricLabel label="需处理" value={`${gate.problemItems.length + dataQuality.warnings.length} 项`} />
+      </div>
+      {hasIssues ? (
+        <QualityIssueList dataQuality={dataQuality} />
+      ) : (
+        <Alert className="quality-clean-alert" type="success" showIcon message="当前数据质量正常，交易信号未被数据质量阻断。" />
+      )}
+    </Space>
+  );
+}
+
+function QualityIssueList({ dataQuality, compact = false }: { dataQuality: DataQualityResponse; compact?: boolean }) {
+  const gate = getQualityGate(dataQuality);
+  const items = gate.problemItems;
+
+  if (!items.length && !dataQuality.warnings.length) {
+    return null;
+  }
+
+  return (
+    <div className={compact ? 'quality-reason-list compact' : 'quality-reason-list'}>
+      {dataQuality.warnings.map((warning) => (
+        <div className="quality-reason-item" key={`warning-${warning}`}>
+          <div className="quality-reason-head">
+            <Text strong><WarningOutlined /> 全局告警</Text>
+            <Text className="muted">{warningLabel(warning)}</Text>
+          </div>
+        </div>
+      ))}
+      {items.map((item) => (
+        <div className="quality-reason-item" key={item.code}>
+          <div className="quality-reason-head">
+            <Text strong>{item.code} · {item.name}</Text>
+            <Text className="muted">{item.source} · {item.age_seconds == null ? '无时间戳' : `${item.age_seconds.toFixed(0)}s`}</Text>
+          </div>
+          <div className="quality-reason-tags">
+            <Tag color={qualityItemTagColor(item)}>{qualityItemLevel(item)}</Tag>
+            <Tag>{item.score.toFixed(0)}分</Tag>
+            {item.issues.length ? <WarningTags warnings={item.issues} /> : <Text className="muted">评分偏低，交易前复核</Text>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getQualityGate(dataQuality?: DataQualityResponse): QualityGateView {
+  if (!dataQuality) {
+    return {
+      status: 'missing',
+      label: '无数据',
+      detail: '数据质量报告尚未生成',
+      scoreText: '-',
+      tagColor: 'default',
+      badgeStatus: 'default',
+      okCount: 0,
+      totalCount: 0,
+      problemItems: []
+    };
+  }
+
+  const items = dataQuality.items ?? [];
+  const blockedItems = items.filter((item) => !item.ok || item.score < 70);
+  const cautiousItems = items.filter((item) => item.ok && item.score >= 70 && item.score < 90);
+  const warningItems = items.filter((item) => item.score >= 90 && item.issues.length > 0);
+  const problemItems = [...blockedItems, ...cautiousItems, ...warningItems];
+  const okCount = items.filter((item) => item.ok).length;
+  const totalCount = items.length;
+  const scoreText = `${dataQuality.overall_score.toFixed(0)}分`;
+
+  if (blockedItems.length > 0 || dataQuality.overall_score < 70) {
+    return {
+      status: 'blocked',
+      label: '不可用',
+      detail: `存在数据阻断 · ${okCount}/${totalCount} 标的可用 · 暂停依赖相关信号`,
+      scoreText,
+      tagColor: 'red',
+      badgeStatus: 'error',
+      okCount,
+      totalCount,
+      problemItems
+    };
+  }
+
+  if (cautiousItems.length > 0 || dataQuality.warnings.length > 0 || dataQuality.overall_score < 90) {
+    return {
+      status: 'caution',
+      label: '谨慎',
+      detail: `部分数据需要复核 · ${okCount}/${totalCount} 标的可用 · 新开仓先人工确认`,
+      scoreText,
+      tagColor: 'orange',
+      badgeStatus: 'warning',
+      okCount,
+      totalCount,
+      problemItems
+    };
+  }
+
+  return {
+    status: 'trusted',
+    label: '可信',
+    detail: `全部可信 · ${okCount}/${totalCount} 标的可用 · 不影响交易信号`,
+    scoreText,
+    tagColor: 'green',
+    badgeStatus: 'success',
+    okCount,
+    totalCount,
+    problemItems
+  };
+}
+
+function qualityGateMeta(dataQuality?: DataQualityResponse): string {
+  if (!dataQuality) {
+    return '-';
+  }
+  const gate = getQualityGate(dataQuality);
+  return `${gate.label} · ${formatDateTime(dataQuality.generated_at)}`;
+}
+
+function qualityItemLevel(item: DataQualityItem): string {
+  if (!item.ok || item.score < 70) {
+    return '不可用';
+  }
+  if (item.score < 90 || item.issues.length > 0) {
+    return '谨慎';
+  }
+  return '可信';
+}
+
+function qualityItemTagColor(item: DataQualityItem): string {
+  if (!item.ok || item.score < 70) {
+    return 'red';
+  }
+  if (item.score < 90 || item.issues.length > 0) {
+    return 'orange';
+  }
+  return 'green';
 }
 
 function SectionHeader({ icon, title, meta, extra }: { icon: ReactNode; title: string; meta?: string; extra?: ReactNode }) {
@@ -1479,7 +1663,11 @@ function warningLabel(value: string): string {
     'invalid price': '价格无效',
     'missing latest snapshot': '缺少最新行情快照',
     'missing ETF IOPV': '缺少ETF IOPV',
-    'ETF premium/discount absolute value over 3%': 'ETF溢折价绝对值超过3%'
+    'ETF premium/discount absolute value over 3%': 'ETF溢折价绝对值超过3%',
+    'zero amount': '成交额为0，流动性数据不可用',
+    'some instruments have weak data quality; avoid using them for fresh entry signals': '部分标的数据质量偏弱，避免直接开新仓',
+    'one or more snapshots are stale': '部分行情快照延迟',
+    'free fallback quote source is in use; validate before fresh entry signals': '使用备用免费行情源，交易前复核'
   };
   return map[value] ?? value;
 }

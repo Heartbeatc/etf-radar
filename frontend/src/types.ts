@@ -409,6 +409,10 @@ export interface QuantExecutionAdvice {
   side: string;
   action: string;
   urgency: string;
+  current_price: number | null;
+  action_score: number | null;
+  low_buy_score: number | null;
+  risk_score: number | null;
   target_weight_pct: number | null;
   position_delta_pct: number | null;
   order_style: string;

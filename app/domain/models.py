@@ -627,6 +627,10 @@ class QuantExecutionAdvice(BaseModel):
     side: str
     action: str
     urgency: str
+    current_price: float | None = None
+    action_score: int | None = None
+    low_buy_score: int | None = None
+    risk_score: int | None = None
     target_weight_pct: float | None = None
     position_delta_pct: int | None = None
     order_style: str

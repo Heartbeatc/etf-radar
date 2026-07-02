@@ -397,7 +397,9 @@ function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; 
         <Text className="muted">{item.code} · {etfRegionLabel(item.name)}</Text>
       </div>
       <div className="trade-metrics">
+        <DecisionMetric label="当前价" value={formatPrice(item.current_price)} />
         <DecisionMetric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
+        <DecisionMetric label="低吸分" value={lowBuyScoreText(item.low_buy_score)} />
         <DecisionMetric label="目标仓位" value={formatPercentNumber(item.target_weight_pct)} />
         <DecisionMetric label="止盈" value={formatPrice(item.take_profit_price)} />
         <DecisionMetric label="防守" value={formatPrice(item.stop_price)} />
@@ -655,8 +657,21 @@ function executionShortText(item: QuantExecutionAdvice): string {
   if (item.side === 'HOLD') return '持有跟踪';
   if (item.action === 'AVOID') return '回避';
   if (item.action === 'WAIT_PULLBACK') return '等回落';
+  if (item.action === 'WAIT_CONFIRMATION' || (isPriceInLowBuyZone(item) && (item.low_buy_score ?? 0) < 70)) return '价到，分数不足';
   if (item.action === 'WAIT_BUY_ZONE' || item.action === 'WATCH_LOW_BUY') return '等低吸区';
-  return '等待';
+  return isPriceInLowBuyZone(item) ? '价到，等确认' : '等待';
+}
+
+function isPriceInLowBuyZone(item: QuantExecutionAdvice): boolean {
+  return item.current_price != null
+    && item.trigger_price_low != null
+    && item.trigger_price_high != null
+    && item.current_price >= item.trigger_price_low
+    && item.current_price <= item.trigger_price_high;
+}
+
+function lowBuyScoreText(value: number | null | undefined): string {
+  return value == null ? '-' : `${value.toFixed(0)}/70`;
 }
 
 function etfRegionLabel(name: string): string {
@@ -740,6 +755,7 @@ function actionLabel(value: string): string {
     WATCH_LOW_BUY: '低吸观察',
     WAIT_PULLBACK: '等回落',
     WAIT_DATA: '等数据',
+    WAIT_CONFIRMATION: '价到待确认',
     AVOID: '回避',
     WAIT: '等待',
     WATCH: '观察',

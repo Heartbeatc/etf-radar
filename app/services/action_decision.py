@@ -134,6 +134,8 @@ def _action_fields(plan: TradePlan, position: Position | None) -> tuple[str, str
     if zone_low is not None and zone_high is not None and zone_low <= price <= zone_high and plan.low_buy_score >= 70:
         urgency = "high" if plan.low_buy_score >= 82 else "medium"
         return "BUY_FIRST_BATCH", "BUY", urgency, plan.low_buy_score, reasons + ["价格进入低吸区间"], risks
+    if zone_low is not None and zone_high is not None and zone_low <= price <= zone_high:
+        return "WAIT_CONFIRMATION", "WAIT", "normal", plan.low_buy_score, reasons + ["价格在低吸区，但低吸分未达70首仓阈值"], risks
     if plan.low_buy_score >= 80:
         return "WAIT_BUY_ZONE", "WAIT", "medium", plan.low_buy_score, reasons + ["低吸分高，但价格未到低吸区"], risks
     if plan.low_buy_score >= 65 or plan.signal == "watch_low_buy":

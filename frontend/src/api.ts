@@ -9,6 +9,7 @@ import type {
   IntegrationStatus,
   LatestResponse,
   MarketFlowResponse,
+  PoolRecommendationResponse,
   RiskResponse,
   WebLoginResponse,
   WebSessionInfo
@@ -88,6 +89,8 @@ export const api = {
     requestJson<DiscoveryResponse>(`/api/v1/discovery${force ? '?force=true' : ''}`, { token, signal }),
   getMarketFlow: (token: string, force = false, signal?: AbortSignal) =>
     requestJson<MarketFlowResponse>(`/api/v1/market-flow${force ? '?force=true' : ''}`, { token, signal }),
+  getPoolRecommendation: (token: string, signal?: AbortSignal) =>
+    requestJson<PoolRecommendationResponse>('/api/v1/pool-recommendation', { token, signal }),
   getRisk: (token: string, signal?: AbortSignal) => requestJson<RiskResponse>('/api/v1/risk', { token, signal }),
   getDataQuality: (token: string, signal?: AbortSignal) =>
     requestJson<DataQualityResponse>('/api/v1/data-quality', { token, signal }),

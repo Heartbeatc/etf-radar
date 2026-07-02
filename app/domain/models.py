@@ -414,6 +414,42 @@ class MarketFlowResponse(BaseModel):
     assumptions: list[str]
 
 
+class PoolRecommendationItem(BaseModel):
+    code: str
+    name: str
+    current_role: str | None = None
+    recommended_role: str | None = None
+    action: str
+    score: int
+    rank: int | None = None
+    direction_key: str | None = None
+    direction_label: str | None = None
+    direction_state: str | None = None
+    mainline_probability: int | None = None
+    low_buy_readiness_score: int | None = None
+    carrier_score: int | None = None
+    price: float | None = None
+    amount: float | None = None
+    premium_pct: float | None = None
+    entry_bias: str | None = None
+    source_time: datetime | None = None
+    reasons: list[str]
+    risk_flags: list[str]
+
+
+class PoolRecommendationResponse(BaseModel):
+    generated_at: datetime
+    source: str
+    status: str
+    current_main_codes: list[str]
+    current_backup_codes: list[str]
+    recommended_main_codes: list[str]
+    recommended_backup_codes: list[str]
+    items: list[PoolRecommendationItem]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 
 class WebLoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)

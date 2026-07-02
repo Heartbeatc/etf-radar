@@ -58,6 +58,8 @@ import type {
   LatestResponse,
   MarketDirection,
   MarketFlowResponse,
+  PoolRecommendationItem,
+  PoolRecommendationResponse,
   RiskItem,
   RiskResponse,
   TradingPlan,
@@ -101,6 +103,12 @@ function App() {
     ['market-flow', sessionToken],
     sessionToken,
     ({ signal }) => api.getMarketFlow(sessionToken, false, signal),
+    autoRefresh ? 60_000 : false
+  );
+  const poolRecommendationQuery = useProtectedQuery(
+    ['pool-recommendation', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getPoolRecommendation(sessionToken, signal),
     autoRefresh ? 60_000 : false
   );
   const riskQuery = useProtectedQuery(['risk', sessionToken], sessionToken, ({ signal }) => api.getRisk(sessionToken, signal), autoRefresh ? 30_000 : false);
@@ -181,9 +189,9 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
 
   useEffect(() => {
@@ -254,6 +262,7 @@ function App() {
                 latest={latestQuery.data}
                 discovery={discoveryQuery.data}
                 marketFlow={marketFlowQuery.data}
+                poolRecommendation={poolRecommendationQuery.data}
                 risk={riskQuery.data}
                 dataQuality={dataQualityQuery.data}
                 integrations={integrationsQuery.data ?? []}
@@ -334,6 +343,7 @@ interface DashboardProps {
   latest?: LatestResponse;
   discovery?: DiscoveryResponse;
   marketFlow?: MarketFlowResponse;
+  poolRecommendation?: PoolRecommendationResponse;
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
@@ -350,7 +360,7 @@ interface DashboardProps {
 }
 
 function Dashboard(props: DashboardProps) {
-  const { latest, discovery, marketFlow, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const { latest, discovery, marketFlow, poolRecommendation, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
   const tabItems = [
@@ -367,7 +377,7 @@ function Dashboard(props: DashboardProps) {
     {
       key: 'discovery',
       label: <span><LineChartOutlined /> ETF载体</span>,
-      children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} poolRecommendation={poolRecommendation} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
       key: 'signals',
@@ -624,12 +634,13 @@ function BoardTags({ direction }: { direction: MarketDirection }) {
   );
 }
 
-function DiscoveryTab({ latest, discovery, marketFlow, onForceDiscovery, forcingDiscovery }: { latest?: LatestResponse; discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
+function DiscoveryTab({ latest, discovery, marketFlow, poolRecommendation, onForceDiscovery, forcingDiscovery }: { latest?: LatestResponse; discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; poolRecommendation?: PoolRecommendationResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
   const candidates = useMemo(() => getDiscoveryCandidates(discovery), [discovery]);
 
   return (
     <Space direction="vertical" size="large" className="wide-stack">
       <CandidateCards latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      <PoolRecommendationPanel recommendation={poolRecommendation} />
       <section className="panel">
         <SectionHeader icon={<ThunderboltOutlined />} title="ETF方向库" meta={discovery ? formatDateTime(discovery.generated_at) : '-'} />
         <DirectionTable data={discovery?.directions ?? []} />
@@ -851,6 +862,68 @@ function CandidateCards({ latest, discovery, marketFlow, onForceDiscovery, forci
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无ETF载体" />
       )}
     </section>
+  );
+}
+
+function PoolRecommendationPanel({ recommendation }: { recommendation?: PoolRecommendationResponse }) {
+  return (
+    <section className="panel">
+      <SectionHeader icon={<SafetyCertificateOutlined />} title="固定池量化建议" meta={recommendation ? `${poolStatusLabel(recommendation.status)} · ${formatDateTime(recommendation.generated_at)}` : '-'} />
+      {!recommendation ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无固定池建议" />
+      ) : (
+        <Space direction="vertical" size="middle" className="wide-stack">
+          <div className="pool-summary-grid">
+            <MetricLabel label="当前主要" value={recommendation.current_main_codes.join(', ') || '-'} />
+            <MetricLabel label="当前备选" value={recommendation.current_backup_codes.join(', ') || '-'} />
+            <MetricLabel label="建议主要" value={recommendation.recommended_main_codes.join(', ') || '-'} />
+            <MetricLabel label="建议备选" value={recommendation.recommended_backup_codes.join(', ') || '-'} />
+          </div>
+          {recommendation.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
+          <PoolRecommendationTable data={recommendation.items} />
+        </Space>
+      )}
+    </section>
+  );
+}
+
+function PoolRecommendationTable({ data }: { data: PoolRecommendationItem[] }) {
+  const columns: ColumnsType<PoolRecommendationItem> = [
+    { title: '动作', dataIndex: 'action', key: 'action', width: 110, render: (value: string) => <Tag color={poolActionColor(value)}>{poolActionLabel(value)}</Tag> },
+    {
+      title: 'ETF',
+      key: 'etf',
+      fixed: 'left',
+      width: 210,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{record.name}</Text>
+          <Text className="muted">{record.code}</Text>
+        </Space>
+      )
+    },
+    { title: '角色', key: 'role', width: 130, render: (_, record) => `${roleLabel(record.current_role ?? '-') } -> ${roleLabel(record.recommended_role ?? '-')}` },
+    { title: '量化分', dataIndex: 'score', key: 'score', width: 110, render: (value: number) => <ScoreCell value={value} /> },
+    { title: '方向', dataIndex: 'direction_label', key: 'direction_label', width: 130, render: (value: string | null) => value ?? '-' },
+    { title: '状态', dataIndex: 'direction_state', key: 'direction_state', width: 110, render: (value: string | null) => value ? <MarketStateTag value={value} /> : '-' },
+    { title: '主线', dataIndex: 'mainline_probability', key: 'mainline_probability', width: 90, render: (value: number | null) => value == null ? '-' : value },
+    { title: '低吸', dataIndex: 'low_buy_readiness_score', key: 'low_buy_readiness_score', width: 90, render: (value: number | null) => value == null ? '-' : value },
+    { title: '成交额', dataIndex: 'amount', key: 'amount', width: 120, render: formatAmount },
+    { title: '溢价', dataIndex: 'premium_pct', key: 'premium_pct', width: 90, render: (value: number | null) => <PercentValue value={value} neutral /> },
+    { title: '理由', dataIndex: 'reasons', key: 'reasons', width: 260, render: (reasons: string[]) => <PoolReasonTags items={reasons} /> },
+    { title: '风险', dataIndex: 'risk_flags', key: 'risk_flags', width: 240, render: (flags: string[]) => <PoolReasonTags items={flags} color="orange" /> }
+  ];
+  return <Table rowKey={(record) => `${record.action}-${record.code}`} columns={columns} dataSource={data} size="middle" pagination={false} scroll={{ x: 1640 }} />;
+}
+
+function PoolReasonTags({ items, color = 'blue' }: { items: string[]; color?: string }) {
+  if (!items.length) {
+    return <Text className="muted">-</Text>;
+  }
+  return (
+    <Space size={[0, 4]} wrap>
+      {items.slice(0, 4).map((item) => <Tag color={color} key={item}>{item}</Tag>)}
+    </Space>
   );
 }
 
@@ -1899,6 +1972,38 @@ function roleLabel(value: string): string {
     benchmark: '基准'
   };
   return map[value] ?? value;
+}
+
+function poolStatusLabel(value: string): string {
+  const map: Record<string, string> = {
+    keep: '保持固定池',
+    partial_rotate: '部分调仓候选',
+    rotate: '调仓候选',
+    no_recommendation: '暂无建议'
+  };
+  return map[value] ?? value;
+}
+
+function poolActionLabel(value: string): string {
+  const map: Record<string, string> = {
+    keep: '保留',
+    promote: '建议纳入',
+    replace_candidate: '建议替换',
+    watch: '观察',
+    avoid: '回避'
+  };
+  return map[value] ?? value;
+}
+
+function poolActionColor(value: string): string {
+  const map: Record<string, string> = {
+    keep: 'green',
+    promote: 'blue',
+    replace_candidate: 'orange',
+    watch: 'default',
+    avoid: 'red'
+  };
+  return map[value] ?? 'default';
 }
 
 function signalLabel(value: string): string {

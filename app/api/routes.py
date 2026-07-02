@@ -19,6 +19,7 @@ from app.domain.models import (
     IntegrationStatus,
     LatestResponse,
     MarketFlowResponse,
+    PoolRecommendationResponse,
     Position,
     PositionInput,
     SignalRecord,
@@ -31,6 +32,7 @@ from app.domain.models import (
 )
 from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
+from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.risk import build_risk_report
 from app.api.security import AuthPrincipal, authenticate_web_user, require_api_token
 
@@ -111,6 +113,12 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     @app.get("/api/v1/market-flow", response_model=MarketFlowResponse, dependencies=PROTECTED)
     async def market_flow(force: bool = Query(default=False)) -> MarketFlowResponse:
         return await runtime.market_flow(force=force)
+
+
+    @app.get("/api/v1/pool-recommendation", response_model=PoolRecommendationResponse, dependencies=PROTECTED)
+    async def pool_recommendation() -> PoolRecommendationResponse:
+        market_flow_report = await runtime.market_flow()
+        return build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
 
     @app.get("/api/v1/risk", response_model=RiskReport, dependencies=PROTECTED)
     async def risk() -> RiskReport:

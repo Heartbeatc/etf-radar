@@ -889,3 +889,15 @@ body {
 .carrier-context {
   margin: 0 0 12px;
 }
+
+.pool-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 768px) {
+  .pool-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

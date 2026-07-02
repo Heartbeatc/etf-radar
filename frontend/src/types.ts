@@ -225,6 +225,42 @@ export interface MarketFlowResponse {
   assumptions: string[];
 }
 
+export interface PoolRecommendationItem {
+  code: string;
+  name: string;
+  current_role: string | null;
+  recommended_role: string | null;
+  action: string;
+  score: number;
+  rank: number | null;
+  direction_key: string | null;
+  direction_label: string | null;
+  direction_state: string | null;
+  mainline_probability: number | null;
+  low_buy_readiness_score: number | null;
+  carrier_score: number | null;
+  price: number | null;
+  amount: number | null;
+  premium_pct: number | null;
+  entry_bias: string | null;
+  source_time: string | null;
+  reasons: string[];
+  risk_flags: string[];
+}
+
+export interface PoolRecommendationResponse {
+  generated_at: string;
+  source: string;
+  status: string;
+  current_main_codes: string[];
+  current_backup_codes: string[];
+  recommended_main_codes: string[];
+  recommended_backup_codes: string[];
+  items: PoolRecommendationItem[];
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface RiskItem {
   code: string;
   name: string;

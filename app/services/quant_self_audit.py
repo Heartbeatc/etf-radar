@@ -38,7 +38,7 @@ def build_quant_self_audit_report(
         disproof_summary=_disproof_summary(findings),
         findings=findings,
         source_refs=[
-            "Federal Reserve/OCC/FDIC Model Risk Management guidance: https://www.federalreserve.gov/supervisionreg/srletters/SR2602.pdf",
+            "Federal Reserve/OCC/FDIC Model Risk Management guidance: https://www.federalreserve.gov/supervisionreg/srletters/SR2602a1.pdf",
             "Bailey and Lopez de Prado - Deflated Sharpe Ratio: https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf",
             "Harvey, Liu, Zhu - Multiple Testing in Expected Returns: https://www.nber.org/system/files/working_papers/w20592/w20592.pdf",
             "QuantConnect Algorithm Framework: https://www.quantconnect.com/docs/v2/writing-algorithms/algorithm-framework/overview",

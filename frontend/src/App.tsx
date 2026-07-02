@@ -367,7 +367,7 @@ function Dashboard(props: DashboardProps) {
     {
       key: 'discovery',
       label: <span><LineChartOutlined /> ETF载体</span>,
-      children: <DiscoveryTab discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
       key: 'signals',
@@ -414,7 +414,7 @@ function OverviewTab({ latest, discovery, marketFlow, risk, dataQuality, onForce
   return (
     <Space direction="vertical" size="large" className="wide-stack">
       <MarketFlowSummary marketFlow={marketFlow} compact />
-      <CandidateCards discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} compact />
+      <CandidateCards latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} compact />
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={14}>
           <section className="panel">
@@ -624,12 +624,12 @@ function BoardTags({ direction }: { direction: MarketDirection }) {
   );
 }
 
-function DiscoveryTab({ discovery, marketFlow, onForceDiscovery, forcingDiscovery }: { discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
+function DiscoveryTab({ latest, discovery, marketFlow, onForceDiscovery, forcingDiscovery }: { latest?: LatestResponse; discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean }) {
   const candidates = useMemo(() => getDiscoveryCandidates(discovery), [discovery]);
 
   return (
     <Space direction="vertical" size="large" className="wide-stack">
-      <CandidateCards discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+      <CandidateCards latest={latest} discovery={discovery} marketFlow={marketFlow} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
       <section className="panel">
         <SectionHeader icon={<ThunderboltOutlined />} title="ETF方向库" meta={discovery ? formatDateTime(discovery.generated_at) : '-'} />
         <DirectionTable data={discovery?.directions ?? []} />
@@ -781,9 +781,12 @@ function MetricStrip({ latest, discovery, marketFlow, risk, dataQuality, integra
   );
 }
 
-function CandidateCards({ discovery, marketFlow, onForceDiscovery, forcingDiscovery, compact = false }: { discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean; compact?: boolean }) {
+function CandidateCards({ latest, discovery, marketFlow, onForceDiscovery, forcingDiscovery, compact = false }: { latest?: LatestResponse; discovery?: DiscoveryResponse; marketFlow?: MarketFlowResponse; onForceDiscovery: () => void; forcingDiscovery: boolean; compact?: boolean }) {
   const carrierSet = getCarrierCandidateSet(marketFlow, discovery);
   const candidates = carrierSet.candidates;
+  const fixedPoolCodes = getFixedPoolCodes(latest);
+  const matchedCount = candidates.filter((candidate) => fixedPoolCodes.has(candidate.code)).length;
+  const hasPoolMismatch = fixedPoolCodes.size > 0 && candidates.length > 0 && matchedCount < candidates.length;
 
   return (
     <section className="panel">
@@ -809,6 +812,12 @@ function CandidateCards({ discovery, marketFlow, onForceDiscovery, forcingDiscov
           <Tag color="orange">ETF库兜底</Tag>
         </div>
       )}
+      {candidates.length > 0 && fixedPoolCodes.size > 0 && (
+        <div className="carrier-context">
+          <Tag color={hasPoolMismatch ? 'orange' : 'green'}>固定池匹配 {matchedCount}/{candidates.length}</Tag>
+          {hasPoolMismatch && <Text className="muted">未入固定池的载体只代表方向机会，暂无低吸/止盈/风控信号。</Text>}
+        </div>
+      )}
       {candidates.length ? (
         <div className={compact ? 'candidate-grid compact' : 'candidate-grid'}>
           {candidates.map((candidate) => {
@@ -818,6 +827,7 @@ function CandidateCards({ discovery, marketFlow, onForceDiscovery, forcingDiscov
                 <Space direction="vertical" size="small" className="card-stack">
                   <Space wrap>
                     <Tag color={candidate.role === 'backup' ? 'gold' : 'blue'}>{roleLabel(candidate.role)}</Tag>
+                    <Tag color={fixedPoolCodes.has(candidate.code) ? 'green' : 'orange'}>{fixedPoolCodes.has(candidate.code) ? '固定池内' : '未入固定池'}</Tag>
                     <EntryBiasTag value={candidate.entry_bias} />
                     {candidate.risk_flags.map((flag) => <Tag color="red" key={flag}>{flag}</Tag>)}
                   </Space>
@@ -1777,6 +1787,10 @@ function carrierCandidateMeta(carrierSet: CarrierCandidateSet): string {
 
 function carrierScore(candidate: DiscoveryEtfCandidate): number {
   return candidate.mapping_score ?? candidate.score;
+}
+
+function getFixedPoolCodes(latest?: LatestResponse): Set<string> {
+  return new Set((latest?.plans ?? []).map((plan) => plan.code));
 }
 
 function isWeakCarrierDirection(direction: MarketDirection): boolean {

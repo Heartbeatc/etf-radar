@@ -11,6 +11,8 @@ import type {
   LatestResponse,
   MarketFlowResponse,
   PoolRecommendationResponse,
+  Position,
+  PositionInput,
   QuantDecisionResponse,
   RiskResponse,
   WebLoginResponse,
@@ -97,6 +99,10 @@ export const api = {
     requestJson<QuantDecisionResponse>('/api/v1/quant-decision', { token, signal }),
   getActionDecisions: (token: string, signal?: AbortSignal) =>
     requestJson<ActionDecisionResponse>('/api/v1/action-decisions', { token, signal }),
+  getPositions: (token: string, signal?: AbortSignal) => requestJson<Position[]>('/api/v1/positions', { token, signal }),
+  upsertPosition: (token: string, code: string, input: PositionInput) =>
+    requestJson<Position>(`/api/v1/positions/${code}`, { method: 'PUT', token, body: input }),
+  deletePosition: (token: string, code: string) => requestJson<{ deleted: boolean }>(`/api/v1/positions/${code}`, { method: 'DELETE', token }),
   getRisk: (token: string, signal?: AbortSignal) => requestJson<RiskResponse>('/api/v1/risk', { token, signal }),
   getDataQuality: (token: string, signal?: AbortSignal) =>
     requestJson<DataQualityResponse>('/api/v1/data-quality', { token, signal }),

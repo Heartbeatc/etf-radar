@@ -41,7 +41,7 @@ import {
   BulbOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import type {
   ActionDecisionItem,
@@ -62,6 +62,8 @@ import type {
   MarketFlowResponse,
   PoolRecommendationItem,
   PoolRecommendationResponse,
+  Position,
+  PositionInput,
   QuantDecisionResponse,
   QuantEtfDecision,
   QuantStockDecision,
@@ -75,6 +77,15 @@ const { Header, Content } = Layout;
 const { Text, Title } = Typography;
 const { useBreakpoint } = Grid;
 
+function invalidateTradingQueries(queryClient: QueryClient, token: string) {
+  queryClient.invalidateQueries({ queryKey: ['positions', token] });
+  queryClient.invalidateQueries({ queryKey: ['action-decisions', token] });
+  queryClient.invalidateQueries({ queryKey: ['quant-decision', token] });
+  queryClient.invalidateQueries({ queryKey: ['latest', token] });
+  queryClient.invalidateQueries({ queryKey: ['data-quality', token] });
+  queryClient.invalidateQueries({ queryKey: ['health'] });
+}
+
 function App() {
   const queryClient = useQueryClient();
   const { message } = AntdApp.useApp();
@@ -82,6 +93,10 @@ function App() {
   const [loginOpen, setLoginOpen] = useState(!sessionToken);
   const [loginUsername, setLoginUsername] = useState('admin');
   const [loginPassword, setLoginPassword] = useState('');
+  const [positionCode, setPositionCode] = useState('');
+  const [positionEntry, setPositionEntry] = useState('');
+  const [positionShares, setPositionShares] = useState('');
+  const [positionNote, setPositionNote] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const isMobile = useIsMobileLayout();
 
@@ -118,6 +133,7 @@ function App() {
   );
   const actionDecisionQuery = useProtectedQuery(['action-decisions', sessionToken], sessionToken, ({ signal }) => api.getActionDecisions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const quantDecisionQuery = useProtectedQuery(['quant-decision', sessionToken], sessionToken, ({ signal }) => api.getQuantDecision(sessionToken, signal), autoRefresh ? 30_000 : false);
+  const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const riskQuery = useProtectedQuery(['risk', sessionToken], sessionToken, ({ signal }) => api.getRisk(sessionToken, signal), autoRefresh ? 30_000 : false);
   const dataQualityQuery = useProtectedQuery(
     ['data-quality', sessionToken],
@@ -196,10 +212,32 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, actionDecisionQuery.error, quantDecisionQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const savePositionMutation = useMutation({
+    mutationFn: ({ code, input }: { code: string; input: PositionInput }) => api.upsertPosition(sessionToken, code, input),
+    onSuccess: () => {
+      setPositionCode('');
+      setPositionEntry('');
+      setPositionShares('');
+      setPositionNote('');
+      invalidateTradingQueries(queryClient, sessionToken);
+      message.success('持仓已保存，下一轮采集会纳入监控');
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const deletePositionMutation = useMutation({
+    mutationFn: (code: string) => api.deletePosition(sessionToken, code),
+    onSuccess: () => {
+      invalidateTradingQueries(queryClient, sessionToken);
+      message.success('持仓已删除');
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, actionDecisionQuery.error, quantDecisionQuery.error, positionsQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, actionDecisionQuery, quantDecisionQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
-  const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
+  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, actionDecisionQuery, quantDecisionQuery, positionsQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, positionsQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
 
   useEffect(() => {
     if (unauthorized && sessionToken) {
@@ -227,6 +265,28 @@ function App() {
 
   const refreshAll = () => {
     queryClient.invalidateQueries();
+  };
+
+  const savePosition = () => {
+    const code = positionCode.trim();
+    const entry = Number(positionEntry);
+    const shares = positionShares.trim() ? Number(positionShares) : null;
+    if (!/^\d{6}$/.test(code)) {
+      message.warning('请输入6位场内代码');
+      return;
+    }
+    if (!Number.isFinite(entry) || entry <= 0) {
+      message.warning('请输入有效成本价');
+      return;
+    }
+    if (shares != null && (!Number.isFinite(shares) || shares <= 0)) {
+      message.warning('份额必须大于0');
+      return;
+    }
+    savePositionMutation.mutate({
+      code,
+      input: { entry_price: entry, shares, note: positionNote.trim() }
+    });
   };
 
   return (
@@ -272,6 +332,14 @@ function App() {
                 poolRecommendation={poolRecommendationQuery.data}
                 actionDecisions={actionDecisionQuery.data}
                 quantDecision={quantDecisionQuery.data}
+                positions={positionsQuery.data ?? []}
+                positionDraft={{ code: positionCode, entry: positionEntry, shares: positionShares, note: positionNote }}
+                onPositionDraftChange={{ setCode: setPositionCode, setEntry: setPositionEntry, setShares: setPositionShares, setNote: setPositionNote }}
+                onSavePosition={savePosition}
+                savingPosition={savePositionMutation.isPending}
+                onDeletePosition={(code) => deletePositionMutation.mutate(code)}
+                deletingPositionCode={deletePositionMutation.variables ?? null}
+                deletingPosition={deletePositionMutation.isPending}
                 risk={riskQuery.data}
                 dataQuality={dataQualityQuery.data}
                 integrations={integrationsQuery.data ?? []}
@@ -348,6 +416,20 @@ function useIsMobileLayout() {
   return !screens.md;
 }
 
+interface PositionDraft {
+  code: string;
+  entry: string;
+  shares: string;
+  note: string;
+}
+
+interface PositionDraftSetters {
+  setCode: (value: string) => void;
+  setEntry: (value: string) => void;
+  setShares: (value: string) => void;
+  setNote: (value: string) => void;
+}
+
 interface DashboardProps {
   latest?: LatestResponse;
   discovery?: DiscoveryResponse;
@@ -355,6 +437,14 @@ interface DashboardProps {
   poolRecommendation?: PoolRecommendationResponse;
   actionDecisions?: ActionDecisionResponse;
   quantDecision?: QuantDecisionResponse;
+  positions: Position[];
+  positionDraft: PositionDraft;
+  onPositionDraftChange: PositionDraftSetters;
+  onSavePosition: () => void;
+  savingPosition: boolean;
+  onDeletePosition: (code: string) => void;
+  deletingPositionCode: string | null;
+  deletingPosition: boolean;
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
@@ -371,7 +461,7 @@ interface DashboardProps {
 }
 
 function Dashboard(props: DashboardProps) {
-  const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, quantDecision, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, quantDecision, positions, positionDraft, onPositionDraftChange, onSavePosition, savingPosition, onDeletePosition, deletingPositionCode, deletingPosition, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
   const tabItems = [
@@ -394,6 +484,11 @@ function Dashboard(props: DashboardProps) {
       key: 'discovery',
       label: <span><LineChartOutlined /> ETF载体</span>,
       children: <DiscoveryTab latest={latest} discovery={discovery} marketFlow={marketFlow} poolRecommendation={poolRecommendation} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
+    },
+    {
+      key: 'positions',
+      label: <span><SafetyCertificateOutlined /> 持仓</span>,
+      children: <PositionsTab positions={positions} draft={positionDraft} setters={onPositionDraftChange} onSave={onSavePosition} saving={savingPosition} onDelete={onDeletePosition} deletingCode={deletingPositionCode} deleting={deletingPosition} />
     },
     {
       key: 'actions',
@@ -796,6 +891,93 @@ function SignalsTab({ latest }: { latest?: LatestResponse }) {
       <SectionHeader icon={<BarChartOutlined />} title="交易信号" meta={latest ? latestDataTimeMeta(latest) : '-'} />
       <SignalTable data={latest?.plans ?? []} />
     </section>
+  );
+}
+
+
+function PositionsTab({
+  positions,
+  draft,
+  setters,
+  onSave,
+  saving,
+  onDelete,
+  deletingCode,
+  deleting
+}: {
+  positions: Position[];
+  draft: PositionDraft;
+  setters: PositionDraftSetters;
+  onSave: () => void;
+  saving: boolean;
+  onDelete: (code: string) => void;
+  deletingCode: string | null;
+  deleting: boolean;
+}) {
+  return (
+    <Row gutter={[16, 16]}>
+      <Col xs={24} lg={8}>
+        <section className="panel">
+          <SectionHeader icon={<SafetyCertificateOutlined />} title="录入持仓" meta="成本价用于浮盈和风控" />
+          <Space direction="vertical" size="middle" className="wide-stack position-form">
+            <Input value={draft.code} onChange={(event) => setters.setCode(event.target.value)} placeholder="ETF代码，例如 513120" maxLength={6} />
+            <Input value={draft.entry} onChange={(event) => setters.setEntry(event.target.value)} placeholder="持仓成本价" type="number" inputMode="decimal" />
+            <Input value={draft.shares} onChange={(event) => setters.setShares(event.target.value)} placeholder="份额，可不填" type="number" inputMode="decimal" />
+            <Input value={draft.note} onChange={(event) => setters.setNote(event.target.value)} placeholder="备注，可不填" />
+            <Button type="primary" block loading={saving} onClick={onSave}>保存持仓</Button>
+            <Text className="metric-foot">保存后，该代码会进入30秒监控池；第一次完整买卖点要等采集到行情和K线后生成。</Text>
+          </Space>
+        </section>
+      </Col>
+      <Col xs={24} lg={16}>
+        <section className="panel">
+          <SectionHeader icon={<SafetyCertificateOutlined />} title="当前持仓" meta={`${positions.length} 个`} />
+          <PositionTable positions={positions} onDelete={onDelete} deletingCode={deletingCode} deleting={deleting} />
+        </section>
+      </Col>
+    </Row>
+  );
+}
+
+function PositionTable({ positions, onDelete, deletingCode, deleting }: { positions: Position[]; onDelete: (code: string) => void; deletingCode: string | null; deleting: boolean }) {
+  const isMobile = useIsMobileLayout();
+  if (!positions.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无持仓" />;
+  }
+  if (isMobile) {
+    return <PositionCards positions={positions} onDelete={onDelete} deletingCode={deletingCode} deleting={deleting} />;
+  }
+  const columns: ColumnsType<Position> = [
+    { title: '代码', dataIndex: 'code', key: 'code', width: 100, fixed: 'left' },
+    { title: '成本价', dataIndex: 'entry_price', key: 'entry_price', width: 100, render: formatPrice },
+    { title: '份额', dataIndex: 'shares', key: 'shares', width: 110, render: formatNumber },
+    { title: '备注', dataIndex: 'note', key: 'note' },
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at', width: 150, render: formatDateTime },
+    { title: '操作', key: 'actions', width: 100, render: (_, record) => <Button danger size="small" loading={deleting && deletingCode === record.code} onClick={() => onDelete(record.code)}>删除</Button> }
+  ];
+  return <Table rowKey="code" columns={columns} dataSource={positions} size="middle" pagination={false} scroll={{ x: 760 }} />;
+}
+
+function PositionCards({ positions, onDelete, deletingCode, deleting }: { positions: Position[]; onDelete: (code: string) => void; deletingCode: string | null; deleting: boolean }) {
+  return (
+    <div className="mobile-card-list">
+      {positions.map((record) => (
+        <article className="mobile-data-card" key={record.code}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.code}</Text>
+              <Text className="mobile-card-subtitle">更新 {formatDateTime(record.updated_at)}</Text>
+            </div>
+            <Button danger size="small" loading={deleting && deletingCode === record.code} onClick={() => onDelete(record.code)}>删除</Button>
+          </div>
+          <div className="mobile-metric-grid compact">
+            <MobileMetric label="成本" value={formatPrice(record.entry_price)} />
+            <MobileMetric label="份额" value={formatNumber(record.shares)} />
+          </div>
+          {record.note && <MobileCardSection label="备注">{record.note}</MobileCardSection>}
+        </article>
+      ))}
+    </div>
   );
 }
 

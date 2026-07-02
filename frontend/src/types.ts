@@ -12,6 +12,18 @@ export interface HealthResponse {
   source_bad_codes: string[];
 }
 
+
+export interface PositionInput {
+  entry_price: number;
+  shares: number | null;
+  note: string;
+}
+
+export interface Position extends PositionInput {
+  code: string;
+  updated_at: string;
+}
+
 export interface BuyZoneReference {
   vwap: number | null;
   ma5: number | null;

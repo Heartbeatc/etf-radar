@@ -69,6 +69,12 @@ body {
   justify-content: flex-end;
 }
 
+.position-form .metric-foot {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+
 .content {
   width: 100%;
   max-width: 1680px;

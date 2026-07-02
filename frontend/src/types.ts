@@ -723,3 +723,39 @@ export interface QuantAlgorithmReport {
   warnings: string[];
   assumptions: string[];
 }
+
+
+export interface QuantAuditFinding {
+  key: string;
+  label: string;
+  severity: string;
+  passed: boolean;
+  score: number;
+  claim: string;
+  counterargument: string;
+  evidence: string[];
+  blockers: string[];
+  required_evidence: string[];
+}
+
+export interface QuantCapitalVerdict {
+  mature: boolean;
+  maturity_label: string;
+  capital_mode: string;
+  max_allowed_action: string;
+  auto_trade_allowed: boolean;
+  summary: string;
+  hard_no: string[];
+  conditional_yes: string[];
+}
+
+export interface QuantSelfAuditReport {
+  generated_at: string;
+  verdict: QuantCapitalVerdict;
+  proof_summary: string[];
+  disproof_summary: string[];
+  findings: QuantAuditFinding[];
+  source_refs: string[];
+  warnings: string[];
+  assumptions: string[];
+}

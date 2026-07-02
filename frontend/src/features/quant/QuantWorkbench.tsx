@@ -20,6 +20,7 @@ import type {
   Position,
   QuantAlgorithmCandidate,
   QuantAlgorithmReport,
+  QuantAuditFinding,
   QuantExecutionAdvice,
   QuantExecutionCondition,
   QuantFeatureRow,
@@ -27,6 +28,7 @@ import type {
   QuantInsight,
   QuantMaturityReport,
   QuantProductionGate,
+  QuantSelfAuditReport,
   QuantPortfolioTarget,
   QuantRiskAdjustment,
   QuantUniverseAsset,
@@ -86,6 +88,7 @@ interface QuantWorkbenchProps {
   quantValidation?: QuantValidationReport;
   quantMaturity?: QuantMaturityReport;
   quantAlgorithms?: QuantAlgorithmReport;
+  quantSelfAudit?: QuantSelfAuditReport;
   positions: Position[];
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
@@ -133,7 +136,7 @@ export function QuantWorkbench(props: QuantWorkbenchProps) {
           <div className="status-line">
             <ActionTag action={primary.action} side={primary.side} />
             <Tag color={evidenceColor(props.framework?.validation.evidence_strength)}>证据 {evidenceLabel(props.framework?.validation.evidence_strength)}</Tag>
-            <Tag color={props.framework?.validation.live_trading_ready ? 'green' : 'orange'}>{props.framework?.validation.live_trading_ready ? '可实盘' : '研究级'}</Tag>
+            <Tag color={props.quantSelfAudit?.verdict.mature ? 'green' : 'red'}>{props.quantSelfAudit?.verdict.mature ? '资金级候选' : '资金级未过'}</Tag>
             <Text className="muted">{frameworkStageLabel(props.framework)} · {formatDateTime(props.framework?.generated_at)}</Text>
           </div>
         </div>
@@ -167,6 +170,7 @@ export function QuantWorkbench(props: QuantWorkbenchProps) {
         <div className="model-stack">
           <MaturityPanel report={props.quantMaturity} />
           <ProductionReadinessPanel report={props.quantMaturity} />
+          <SelfAuditPanel report={props.quantSelfAudit} />
           <AlgorithmResearchPanel report={props.quantAlgorithms} />
           <ModelPipelinePanel framework={props.framework} report={props.quantMaturity} />
           <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
@@ -316,6 +320,58 @@ function ProductionGateRow({ gate }: { gate: QuantProductionGate }) {
       </div>
     </div>
   );
+}
+
+function SelfAuditPanel({ report }: { report?: QuantSelfAuditReport }) {
+  const failed = report?.findings.filter((item) => !item.passed) ?? [];
+  const visible = (failed.length ? failed : report?.findings ?? []).slice(0, 4);
+  return (
+    <Panel title="反方审计" icon={<SafetyCertificateOutlined />} meta={report?.verdict.maturity_label ?? '等待报告'}>
+      <div className={`self-audit-verdict ${report?.verdict.mature ? 'ready' : 'blocked'}`}>
+        <strong>{report?.verdict.mature ? 'MATURE' : 'NOT MATURE'}</strong>
+        <Text>{report?.verdict.summary ?? '等待资金级自我审计'}</Text>
+      </div>
+      <div className="self-audit-action">
+        <Text className="metric-label">最大允许动作</Text>
+        <Text strong>{report?.verdict.max_allowed_action ?? '-'}</Text>
+      </div>
+      <div className="self-audit-stack">
+        {visible.map((item) => <SelfAuditRow key={item.key} item={item} />)}
+        {!visible.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无反方审计" />}
+      </div>
+    </Panel>
+  );
+}
+
+function SelfAuditRow({ item }: { item: QuantAuditFinding }) {
+  const blocker = item.blockers[0] ?? item.counterargument;
+  return (
+    <div className={`self-audit-row status-${item.passed ? 'pass' : 'fail'} severity-${item.severity}`}>
+      <div>
+        <Space size={4} wrap>
+          <Text strong>{item.label}</Text>
+          <Tag color={auditSeverityColor(item.severity)}>{auditSeverityLabel(item.severity)}</Tag>
+          <Tag color={item.passed ? 'green' : 'red'}>{item.passed ? '通过' : '未过'}</Tag>
+        </Space>
+        <Text className="muted">{blocker}</Text>
+        <Text className="audit-counter">反证：{item.counterargument}</Text>
+      </div>
+      <div className="self-audit-score">
+        <span>分数</span>
+        <strong>{item.score.toFixed(0)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function auditSeverityLabel(severity: string) {
+  const labels: Record<string, string> = { critical: '硬阻断', high: '高风险', medium: '中风险' };
+  return labels[severity] ?? severity;
+}
+
+function auditSeverityColor(severity: string) {
+  const colors: Record<string, string> = { critical: 'red', high: 'orange', medium: 'gold' };
+  return colors[severity] ?? 'default';
 }
 
 function AlgorithmResearchPanel({ report }: { report?: QuantAlgorithmReport }) {

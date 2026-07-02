@@ -1019,6 +1019,113 @@ body {
   line-height: 1;
 }
 
+.self-audit-verdict {
+  display: grid;
+  grid-template-columns: 98px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px;
+  background: #f9fafb;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--sell);
+  border-radius: 6px;
+}
+
+.self-audit-verdict.ready {
+  border-left-color: var(--buy);
+}
+
+.self-audit-verdict.blocked {
+  border-left-color: var(--sell);
+}
+
+.self-audit-verdict strong {
+  color: var(--text-main);
+  font-size: 16px;
+  line-height: 1.1;
+}
+
+.self-audit-verdict .ant-typography {
+  line-height: 1.55;
+}
+
+.self-audit-action {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 9px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+}
+
+.self-audit-action .ant-typography {
+  line-height: 1.45;
+}
+
+.self-audit-stack {
+  display: grid;
+  gap: 7px;
+}
+
+.self-audit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 9px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.self-audit-row.status-pass {
+  border-left-color: var(--buy);
+}
+
+.self-audit-row.status-fail.severity-critical {
+  border-left-color: var(--sell);
+}
+
+.self-audit-row.status-fail.severity-high,
+.self-audit-row.status-fail.severity-medium {
+  border-left-color: var(--wait);
+}
+
+.self-audit-row .ant-typography {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.audit-counter {
+  margin-top: 4px;
+  color: #475467;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.self-audit-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.self-audit-score span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.self-audit-score strong {
+  color: var(--text-main);
+  font-size: 20px;
+  line-height: 1;
+}
+
 .algo-recommendations {
   display: grid;
   gap: 6px;

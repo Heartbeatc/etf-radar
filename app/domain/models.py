@@ -689,6 +689,41 @@ class QuantAlgorithmReport(BaseModel):
     assumptions: list[str]
 
 
+class QuantAuditFinding(BaseModel):
+    key: str
+    label: str
+    severity: str
+    passed: bool
+    score: int
+    claim: str
+    counterargument: str
+    evidence: list[str]
+    blockers: list[str]
+    required_evidence: list[str]
+
+
+class QuantCapitalVerdict(BaseModel):
+    mature: bool
+    maturity_label: str
+    capital_mode: str
+    max_allowed_action: str
+    auto_trade_allowed: bool
+    summary: str
+    hard_no: list[str]
+    conditional_yes: list[str]
+
+
+class QuantSelfAuditReport(BaseModel):
+    generated_at: datetime
+    verdict: QuantCapitalVerdict
+    proof_summary: list[str]
+    disproof_summary: list[str]
+    findings: list[QuantAuditFinding]
+    source_refs: list[str]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class QuantExecutionAdvice(BaseModel):
     code: str
     name: str

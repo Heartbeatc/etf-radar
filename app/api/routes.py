@@ -25,6 +25,7 @@ from app.domain.models import (
     QuantAlgorithmReport,
     QuantFrameworkResponse,
     QuantMaturityReport,
+    QuantSelfAuditReport,
     QuantValidationReport,
     Position,
     PositionInput,
@@ -44,6 +45,7 @@ from app.services.quant_decision import build_quant_decision_report
 from app.services.quant_framework import build_quant_framework_report
 from app.services.quant_algorithms import build_quant_algorithm_report
 from app.services.quant_maturity import build_quant_maturity_report
+from app.services.quant_self_audit import build_quant_self_audit_report
 from app.services.quant_validation import build_quant_validation_report
 from app.services.risk import build_risk_report
 from app.api.security import AuthPrincipal, authenticate_web_user, require_api_token
@@ -168,6 +170,23 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         validation_report = build_quant_validation_report(runtime.store)
         maturity_report = build_quant_maturity_report(market_flow_report, pool_report, framework_report, validation_report)
         return build_quant_algorithm_report(framework_report, validation_report, maturity_report)
+
+    @app.get("/api/v1/quant-self-audit", response_model=QuantSelfAuditReport, dependencies=PROTECTED)
+    async def quant_self_audit() -> QuantSelfAuditReport:
+        market_flow_report = await runtime.market_flow()
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
+        framework_report = build_quant_framework_report(settings, market_flow_report, pool_report, action_report, runtime.store.positions())
+        validation_report = build_quant_validation_report(runtime.store)
+        maturity_report = build_quant_maturity_report(market_flow_report, pool_report, framework_report, validation_report)
+        algorithm_report = build_quant_algorithm_report(framework_report, validation_report, maturity_report)
+        return build_quant_self_audit_report(
+            market_flow_report,
+            framework_report,
+            validation_report,
+            maturity_report,
+            algorithm_report,
+        )
 
     @app.get("/api/v1/pool-recommendation", response_model=PoolRecommendationResponse, dependencies=PROTECTED)
     async def pool_recommendation() -> PoolRecommendationResponse:

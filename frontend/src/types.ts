@@ -674,12 +674,27 @@ export interface QuantMaturityModule {
   gaps: string[];
 }
 
+export interface QuantProductionGate {
+  key: string;
+  label: string;
+  status: string;
+  score: number;
+  evidence: string[];
+  blockers: string[];
+  next_actions: string[];
+}
+
 export interface QuantMaturityReport {
   generated_at: string;
   grade: string;
   score: number;
   verdict: string;
   modules: QuantMaturityModule[];
+  production_ready: boolean;
+  auto_trade_allowed: boolean;
+  gates: QuantProductionGate[];
+  production_blockers: string[];
+  next_upgrades: string[];
   warnings: string[];
   assumptions: string[];
 }

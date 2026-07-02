@@ -639,12 +639,27 @@ class QuantMaturityModule(BaseModel):
     gaps: list[str]
 
 
+class QuantProductionGate(BaseModel):
+    key: str
+    label: str
+    status: str
+    score: int
+    evidence: list[str]
+    blockers: list[str]
+    next_actions: list[str]
+
+
 class QuantMaturityReport(BaseModel):
     generated_at: datetime
     grade: str
     score: int
     verdict: str
     modules: list[QuantMaturityModule]
+    production_ready: bool = False
+    auto_trade_allowed: bool = False
+    gates: list[QuantProductionGate] = Field(default_factory=list)
+    production_blockers: list[str] = Field(default_factory=list)
+    next_upgrades: list[str] = Field(default_factory=list)
     warnings: list[str]
     assumptions: list[str]
 

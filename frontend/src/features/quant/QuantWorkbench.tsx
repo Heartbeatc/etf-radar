@@ -24,6 +24,7 @@ import type {
   QuantFrameworkResponse,
   QuantInsight,
   QuantMaturityReport,
+  QuantProductionGate,
   QuantPortfolioTarget,
   QuantRiskAdjustment,
   QuantUniverseAsset,
@@ -162,6 +163,7 @@ export function QuantWorkbench(props: QuantWorkbenchProps) {
 
         <div className="model-stack">
           <MaturityPanel report={props.quantMaturity} />
+          <ProductionReadinessPanel report={props.quantMaturity} />
           <ModelPipelinePanel framework={props.framework} report={props.quantMaturity} />
           <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
         </div>
@@ -267,6 +269,48 @@ function MaturityPanel({ report }: { report?: QuantMaturityReport }) {
         {!modules.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成熟度模块" />}
       </div>
     </Panel>
+  );
+}
+
+function ProductionReadinessPanel({ report }: { report?: QuantMaturityReport }) {
+  const gates = report?.gates ?? [];
+  const failed = gates.filter((item) => item.status !== 'pass');
+  return (
+    <Panel
+      title="生产闸门"
+      icon={<ThunderboltOutlined />}
+      meta={report?.auto_trade_allowed ? '允许自动交易' : '自动交易关闭'}
+    >
+      <div className={`production-verdict ${report?.production_ready ? 'ready' : 'blocked'}`}>
+        <strong>{report?.auto_trade_allowed ? 'AUTO ON' : 'AUTO OFF'}</strong>
+        <Text>{report?.verdict ?? '等待生产闸门报告'}</Text>
+      </div>
+      <div className="gate-list">
+        {gates.map((gate) => <ProductionGateRow key={gate.key} gate={gate} />)}
+        {!gates.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无生产闸门" />}
+      </div>
+      {!!failed.length && (
+        <div className="next-upgrades">
+          <Text className="metric-label">优先补齐</Text>
+          <TagList items={(report?.next_upgrades ?? []).slice(0, 4)} color="orange" empty="暂无" />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ProductionGateRow({ gate }: { gate: QuantProductionGate }) {
+  return (
+    <div className={`gate-row status-${conditionStatusClass(gate.status)}`}>
+      <div>
+        <Text strong>{gate.label}</Text>
+        <Text className="muted">{gate.blockers[0] ?? gate.evidence[0] ?? '通过'}</Text>
+      </div>
+      <div className="gate-score">
+        <span>{conditionStatusLabel(gate.status)}</span>
+        <strong>{gate.score.toFixed(0)}</strong>
+      </div>
+    </div>
   );
 }
 

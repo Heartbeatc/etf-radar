@@ -931,3 +931,98 @@ body {
     white-space: normal;
   }
 }
+
+
+.production-verdict {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px;
+  background: #f9fafb;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--wait);
+  border-radius: 6px;
+}
+
+.production-verdict.ready {
+  border-left-color: var(--buy);
+}
+
+.production-verdict.blocked {
+  border-left-color: var(--sell);
+}
+
+.production-verdict strong {
+  color: var(--text-main);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.production-verdict .ant-typography {
+  line-height: 1.55;
+}
+
+.gate-list {
+  display: grid;
+  gap: 7px;
+}
+
+.gate-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 3px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.gate-row.status-pass {
+  border-left-color: var(--buy);
+}
+
+.gate-row.status-warn,
+.gate-row.status-wait {
+  border-left-color: var(--wait);
+}
+
+.gate-row.status-fail {
+  border-left-color: var(--sell);
+}
+
+.gate-row .ant-typography {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.gate-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.gate-score span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.gate-score strong {
+  color: var(--text-main);
+  font-size: 19px;
+  line-height: 1;
+}
+
+.next-upgrades {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}

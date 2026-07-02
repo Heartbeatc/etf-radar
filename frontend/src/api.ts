@@ -11,6 +11,7 @@ import type {
   LatestResponse,
   MarketFlowResponse,
   PoolRecommendationResponse,
+  QuantDecisionResponse,
   RiskResponse,
   WebLoginResponse,
   WebSessionInfo
@@ -92,6 +93,8 @@ export const api = {
     requestJson<MarketFlowResponse>(`/api/v1/market-flow${force ? '?force=true' : ''}`, { token, signal }),
   getPoolRecommendation: (token: string, signal?: AbortSignal) =>
     requestJson<PoolRecommendationResponse>('/api/v1/pool-recommendation', { token, signal }),
+  getQuantDecision: (token: string, signal?: AbortSignal) =>
+    requestJson<QuantDecisionResponse>('/api/v1/quant-decision', { token, signal }),
   getActionDecisions: (token: string, signal?: AbortSignal) =>
     requestJson<ActionDecisionResponse>('/api/v1/action-decisions', { token, signal }),
   getRisk: (token: string, signal?: AbortSignal) => requestJson<RiskResponse>('/api/v1/risk', { token, signal }),

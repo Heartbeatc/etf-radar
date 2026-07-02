@@ -261,6 +261,64 @@ export interface PoolRecommendationResponse {
   assumptions: string[];
 }
 
+export interface QuantDirectionDecision {
+  direction_key: string | null;
+  direction_label: string | null;
+  phase: string;
+  phase_label: string;
+  phase_score: number;
+  confidence: string;
+  operation: string;
+  mainline_probability: number | null;
+  residency_score: number | null;
+  retention_score: number | null;
+  low_buy_readiness_score: number | null;
+  evidence: string[];
+  risk_flags: string[];
+}
+
+export interface QuantEtfDecision {
+  code: string;
+  name: string;
+  role: string | null;
+  action: string;
+  operation: string;
+  score: number;
+  direction_label: string | null;
+  price: number | null;
+  buy_zone_low: number | null;
+  buy_zone_high: number | null;
+  avoid_above: number | null;
+  take_profit_price: number | null;
+  exit_price: number | null;
+  reasons: string[];
+  risk_flags: string[];
+}
+
+export interface QuantStockDecision {
+  code: string;
+  name: string;
+  action: string;
+  operation: string;
+  score: number;
+  direction_label: string | null;
+  change_pct: number | null;
+  reasons: string[];
+  risk_flags: string[];
+}
+
+export interface QuantDecisionResponse {
+  generated_at: string;
+  market_status: string;
+  conclusion: string;
+  direction: QuantDirectionDecision;
+  etfs: QuantEtfDecision[];
+  stocks: QuantStockDecision[];
+  fixed_pool_actions: QuantEtfDecision[];
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface RiskItem {
   code: string;
   name: string;

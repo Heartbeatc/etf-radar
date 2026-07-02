@@ -62,6 +62,9 @@ import type {
   MarketFlowResponse,
   PoolRecommendationItem,
   PoolRecommendationResponse,
+  QuantDecisionResponse,
+  QuantEtfDecision,
+  QuantStockDecision,
   RiskItem,
   RiskResponse,
   TradingPlan,
@@ -114,6 +117,7 @@ function App() {
     autoRefresh ? 60_000 : false
   );
   const actionDecisionQuery = useProtectedQuery(['action-decisions', sessionToken], sessionToken, ({ signal }) => api.getActionDecisions(sessionToken, signal), autoRefresh ? 30_000 : false);
+  const quantDecisionQuery = useProtectedQuery(['quant-decision', sessionToken], sessionToken, ({ signal }) => api.getQuantDecision(sessionToken, signal), autoRefresh ? 30_000 : false);
   const riskQuery = useProtectedQuery(['risk', sessionToken], sessionToken, ({ signal }) => api.getRisk(sessionToken, signal), autoRefresh ? 30_000 : false);
   const dataQualityQuery = useProtectedQuery(
     ['data-quality', sessionToken],
@@ -192,9 +196,9 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, actionDecisionQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, latestQuery.error, discoveryQuery.error, marketFlowQuery.error, poolRecommendationQuery.error, actionDecisionQuery.error, quantDecisionQuery.error, riskQuery.error, dataQualityQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, actionDecisionQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, poolRecommendationQuery, actionDecisionQuery, quantDecisionQuery, riskQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [sessionQuery, latestQuery, discoveryQuery, marketFlowQuery, riskQuery, dataQualityQuery].some((query) => query.isLoading);
 
   useEffect(() => {
@@ -267,6 +271,7 @@ function App() {
                 marketFlow={marketFlowQuery.data}
                 poolRecommendation={poolRecommendationQuery.data}
                 actionDecisions={actionDecisionQuery.data}
+                quantDecision={quantDecisionQuery.data}
                 risk={riskQuery.data}
                 dataQuality={dataQualityQuery.data}
                 integrations={integrationsQuery.data ?? []}
@@ -349,6 +354,7 @@ interface DashboardProps {
   marketFlow?: MarketFlowResponse;
   poolRecommendation?: PoolRecommendationResponse;
   actionDecisions?: ActionDecisionResponse;
+  quantDecision?: QuantDecisionResponse;
   risk?: RiskResponse;
   dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
@@ -365,13 +371,18 @@ interface DashboardProps {
 }
 
 function Dashboard(props: DashboardProps) {
-  const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
+  const { latest, discovery, marketFlow, poolRecommendation, actionDecisions, quantDecision, risk, dataQuality, integrations, aiStatus, aiSummaries, onToggleAi, togglingAi, onGenerateAi, generatingAiKind, generatingAi, onForceDiscovery, forcingDiscovery, errorMessage } = props;
   const isMobile = useIsMobileLayout();
 
   const tabItems = [
     {
+      key: 'quant',
+      label: <span><DashboardOutlined /> 量化结论</span>,
+      children: <QuantDecisionTab decision={quantDecision} />
+    },
+    {
       key: 'overview',
-      label: <span><DashboardOutlined /> 总览</span>,
+      label: <span><DashboardOutlined /> 证据总览</span>,
       children: <OverviewTab latest={latest} discovery={discovery} marketFlow={marketFlow} actionDecisions={actionDecisions} risk={risk} dataQuality={dataQuality} onForceDiscovery={onForceDiscovery} forcingDiscovery={forcingDiscovery} />
     },
     {
@@ -414,9 +425,121 @@ function Dashboard(props: DashboardProps) {
   return (
     <>
       {errorMessage && <Alert className="stack-alert" type="error" showIcon message={errorMessage} />}
-      <MetricStrip latest={latest} discovery={discovery} marketFlow={marketFlow} risk={risk} dataQuality={dataQuality} integrations={integrations} />
       <Tabs className="work-tabs" items={tabItems} destroyInactiveTabPane={false} size={isMobile ? 'small' : 'middle'} tabBarGutter={isMobile ? 12 : 24} />
     </>
+  );
+}
+
+function QuantDecisionTab({ decision }: { decision?: QuantDecisionResponse }) {
+  if (!decision) {
+    return <section className="panel"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无量化结论" /></section>;
+  }
+  return (
+    <Space direction="vertical" size="large" className="wide-stack">
+      <section className="panel quant-hero">
+        <SectionHeader icon={<ThunderboltOutlined />} title="量化结论" meta={formatDateTime(decision.generated_at)} />
+        <div className="quant-headline">{decision.conclusion}</div>
+        <Space size={[0, 6]} wrap>
+          <Tag color="blue">主力方向 {decision.direction.direction_label ?? '-'}</Tag>
+          <Tag color={phaseColor(decision.direction.phase)}>{decision.direction.phase_label}</Tag>
+          <Tag>置信 {confidenceLabel(decision.direction.confidence)}</Tag>
+          <Tag>{decision.market_status}</Tag>
+        </Space>
+        <p className="quant-operation">{decision.direction.operation}</p>
+      </section>
+      {decision.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={8}>
+          <section className="panel">
+            <SectionHeader icon={<ThunderboltOutlined />} title="方向阶段" meta={`${decision.direction.phase_score}分`} />
+            <div className="pool-summary-grid compact-two">
+              <MetricLabel label="主线概率" value={decision.direction.mainline_probability ?? '-'} />
+              <MetricLabel label="资金驻留" value={decision.direction.residency_score ?? '-'} />
+              <MetricLabel label="承接" value={decision.direction.retention_score ?? '-'} />
+              <MetricLabel label="低吸" value={decision.direction.low_buy_readiness_score ?? '-'} />
+            </div>
+            <PoolReasonTags items={decision.direction.evidence} />
+          </section>
+        </Col>
+        <Col xs={24} lg={16}>
+          <section className="panel">
+            <SectionHeader icon={<LineChartOutlined />} title="ETF操作" meta={`${decision.etfs.length} 个`} />
+            <QuantEtfCards items={decision.etfs} />
+          </section>
+        </Col>
+      </Row>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <section className="panel">
+            <SectionHeader icon={<BarChartOutlined />} title="固定池当下动作" meta={`${decision.fixed_pool_actions.length} 个`} />
+            <QuantEtfCards items={decision.fixed_pool_actions} compact />
+          </section>
+        </Col>
+        <Col xs={24} lg={12}>
+          <section className="panel">
+            <SectionHeader icon={<SafetyCertificateOutlined />} title="强股验证" meta={`${decision.stocks.length} 个`} />
+            <QuantStockCards items={decision.stocks} />
+          </section>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+
+function QuantEtfCards({ items, compact = false }: { items: QuantEtfDecision[]; compact?: boolean }) {
+  if (!items.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无ETF操作" />;
+  }
+  return (
+    <div className={compact ? 'quant-card-grid compact' : 'quant-card-grid'}>
+      {items.map((item) => (
+        <article className="quant-card" key={`${item.action}-${item.code}`}>
+          <Space direction="vertical" size="small" className="card-stack">
+            <Space wrap>
+              <ActionTag action={item.action} side={quantActionSide(item.action)} />
+              {item.role && <Tag>{roleLabel(item.role)}</Tag>}
+              {item.direction_label && <Tag color="blue">{item.direction_label}</Tag>}
+            </Space>
+            <div>
+              <div className="candidate-name">{item.name}</div>
+              <Text className="muted">{item.code} · {item.operation}</Text>
+            </div>
+            <div className="candidate-metrics">
+              <MetricLabel label="分数" value={<ScoreText value={item.score} />} />
+              <MetricLabel label="现价" value={formatPrice(item.price)} />
+              <MetricLabel label="低吸" value={`${formatPrice(item.buy_zone_low)} - ${formatPrice(item.buy_zone_high)}`} />
+              <MetricLabel label="防守" value={formatPrice(item.exit_price)} />
+            </div>
+          </Space>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function QuantStockCards({ items }: { items: QuantStockDecision[] }) {
+  if (!items.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无强股验证" />;
+  }
+  return (
+    <div className="quant-card-grid compact">
+      {items.map((item) => (
+        <article className="quant-card" key={item.code}>
+          <Space direction="vertical" size="small" className="card-stack">
+            <Space wrap>
+              <Tag color="blue">验证</Tag>
+              <Tag>{item.direction_label ?? '-'}</Tag>
+              <PercentValue value={item.change_pct} />
+            </Space>
+            <div>
+              <div className="candidate-name">{item.name}</div>
+              <Text className="muted">{item.code} · {item.operation}</Text>
+            </div>
+            <Progress percent={clamp(item.score)} size="small" strokeColor={scoreColor(item.score)} />
+          </Space>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -2122,7 +2245,10 @@ function actionLabel(value: string): string {
     WAIT_PULLBACK: '等回落',
     WAIT_DATA: '等数据',
     AVOID: '回避',
-    WAIT: '等待'
+    WAIT: '等待',
+    promote: '建议纳入',
+    replace_candidate: '建议替换',
+    watch: '观察'
   };
   return map[value] ?? value;
 }
@@ -2157,6 +2283,34 @@ function actionPortfolioStatusLabel(value: string): string {
     wait: '等待'
   };
   return map[value] ?? value;
+}
+
+function phaseColor(value: string): string {
+  if (value.includes('main_up')) return 'green';
+  if (value === 'candidate') return 'blue';
+  if (value === 'hot_today' || value === 'overheated') return 'orange';
+  if (value === 'weakening' || value === 'weak') return 'red';
+  return 'default';
+}
+
+function confidenceLabel(value: string): string {
+  const map: Record<string, string> = {
+    high: '高',
+    medium: '中',
+    'medium-low': '中低',
+    low: '低'
+  };
+  return map[value] ?? value;
+}
+
+function quantActionSide(action: string): string {
+  if (action.startsWith('SELL') || action === 'REDUCE_OR_HOLD_TIGHT') return 'SELL';
+  if (action.startsWith('BUY')) return 'BUY';
+  if (action === 'AVOID') return 'AVOID';
+  if (action === 'HOLD' || action === 'HOLD_WATCH') return 'HOLD';
+  if (action === 'promote') return 'BUY';
+  if (action === 'replace_candidate') return 'SELL';
+  return 'WAIT';
 }
 
 function signalLabel(value: string): string {

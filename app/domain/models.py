@@ -488,6 +488,64 @@ class PoolRecommendationResponse(BaseModel):
     assumptions: list[str]
 
 
+class QuantDirectionDecision(BaseModel):
+    direction_key: str | None = None
+    direction_label: str | None = None
+    phase: str
+    phase_label: str
+    phase_score: int
+    confidence: str
+    operation: str
+    mainline_probability: int | None = None
+    residency_score: int | None = None
+    retention_score: int | None = None
+    low_buy_readiness_score: int | None = None
+    evidence: list[str]
+    risk_flags: list[str]
+
+
+class QuantEtfDecision(BaseModel):
+    code: str
+    name: str
+    role: str | None = None
+    action: str
+    operation: str
+    score: int
+    direction_label: str | None = None
+    price: float | None = None
+    buy_zone_low: float | None = None
+    buy_zone_high: float | None = None
+    avoid_above: float | None = None
+    take_profit_price: float | None = None
+    exit_price: float | None = None
+    reasons: list[str]
+    risk_flags: list[str]
+
+
+class QuantStockDecision(BaseModel):
+    code: str
+    name: str
+    action: str
+    operation: str
+    score: int
+    direction_label: str | None = None
+    change_pct: float | None = None
+    reasons: list[str]
+    risk_flags: list[str]
+
+
+class QuantDecisionResponse(BaseModel):
+    generated_at: datetime
+    market_status: str
+    conclusion: str
+    direction: QuantDirectionDecision
+    etfs: list[QuantEtfDecision]
+    stocks: list[QuantStockDecision]
+    fixed_pool_actions: list[QuantEtfDecision]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 
 class WebLoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)

@@ -335,6 +335,117 @@ export interface QuantDecisionResponse {
   assumptions: string[];
 }
 
+
+export interface QuantUniverseAsset {
+  asset_type: string;
+  code: string | null;
+  name: string;
+  direction_key: string | null;
+  direction_label: string | null;
+  role: string;
+  rank: number | null;
+  selected: boolean;
+  reason: string;
+  evidence: string[];
+  risk_flags: string[];
+}
+
+export interface QuantFeatureRow {
+  asset_type: string;
+  code: string | null;
+  name: string;
+  direction_key: string | null;
+  direction_label: string | null;
+  feature_set: string;
+  features: Record<string, unknown>;
+  score: number;
+  evidence: string[];
+  risk_flags: string[];
+}
+
+export interface QuantInsight {
+  asset_type: string;
+  code: string | null;
+  name: string;
+  direction: string;
+  magnitude_score: number;
+  confidence_score: number;
+  confidence_label: string;
+  horizon: string;
+  insight_type: string;
+  generated_from: string;
+  evidence: string[];
+  risk_flags: string[];
+}
+
+export interface QuantPortfolioTarget {
+  code: string;
+  name: string;
+  target_role: string;
+  rebalance_action: string;
+  target_weight_pct: number | null;
+  position_delta_pct: number | null;
+  source_insight: string;
+  target_reason: string;
+  evidence: string[];
+  risk_flags: string[];
+}
+
+export interface QuantRiskAdjustment {
+  code: string;
+  name: string;
+  original_target_weight_pct: number | null;
+  adjusted_target_weight_pct: number | null;
+  position_delta_pct: number | null;
+  risk_level: string;
+  blocked: boolean;
+  reasons: string[];
+  risk_flags: string[];
+}
+
+export interface QuantExecutionAdvice {
+  code: string;
+  name: string;
+  side: string;
+  action: string;
+  urgency: string;
+  target_weight_pct: number | null;
+  position_delta_pct: number | null;
+  order_style: string;
+  trigger_price_low: number | null;
+  trigger_price_high: number | null;
+  avoid_above: number | null;
+  stop_price: number | null;
+  take_profit_price: number | null;
+  notes: string[];
+  blockers: string[];
+}
+
+export interface QuantFrameworkValidation {
+  research_grade: boolean;
+  live_trading_ready: boolean;
+  evidence_strength: string;
+  passed: string[];
+  blockers: string[];
+  required_upgrades: string[];
+}
+
+export interface QuantFrameworkResponse {
+  generated_at: string;
+  market_status: string;
+  architecture: string[];
+  universe: QuantUniverseAsset[];
+  features: QuantFeatureRow[];
+  insights: QuantInsight[];
+  portfolio_targets: QuantPortfolioTarget[];
+  risk_adjustments: QuantRiskAdjustment[];
+  execution_plan: QuantExecutionAdvice[];
+  final_actions: ActionDecisionItem[];
+  validation: QuantFrameworkValidation;
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface RiskItem {
   code: string;
   name: string;

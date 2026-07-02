@@ -31,21 +31,20 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import type {
   ActionDecisionItem,
-  ActionDecisionResponse,
   AiStatus,
   AiSummaryKind,
   AiSummaryReport,
-  DataQualityResponse,
   HealthResponse,
   IntegrationStatus,
-  MarketDirection,
-  MarketFlowResponse,
-  PoolRecommendationItem,
-  PoolRecommendationResponse,
   Position,
   PositionInput,
-  QuantDecisionResponse,
-  QuantEtfDecision,
+  QuantExecutionAdvice,
+  QuantFeatureRow,
+  QuantFrameworkResponse,
+  QuantInsight,
+  QuantPortfolioTarget,
+  QuantRiskAdjustment,
+  QuantUniverseAsset,
   WebSessionInfo
 } from './types';
 
@@ -53,12 +52,8 @@ const { Header, Content } = Layout;
 const { Text, Title } = Typography;
 
 function invalidateTradingQueries(queryClient: QueryClient, token: string) {
-  queryClient.invalidateQueries({ queryKey: ['market-flow', token] });
-  queryClient.invalidateQueries({ queryKey: ['pool-recommendation', token] });
-  queryClient.invalidateQueries({ queryKey: ['quant-decision', token] });
-  queryClient.invalidateQueries({ queryKey: ['action-decisions', token] });
+  queryClient.invalidateQueries({ queryKey: ['quant-framework', token] });
   queryClient.invalidateQueries({ queryKey: ['positions', token] });
-  queryClient.invalidateQueries({ queryKey: ['data-quality', token] });
   queryClient.invalidateQueries({ queryKey: ['health'] });
 }
 
@@ -78,31 +73,16 @@ function App() {
     refetchInterval: autoRefresh ? 30_000 : false
   });
   const sessionQuery = useProtectedQuery(['auth-session', sessionToken], sessionToken, ({ signal }) => api.getSession(sessionToken, signal), autoRefresh ? 60_000 : false);
-  const marketFlowQuery = useProtectedQuery(['market-flow', sessionToken], sessionToken, ({ signal }) => api.getMarketFlow(sessionToken, false, signal), autoRefresh ? 60_000 : false);
-  const poolRecommendationQuery = useProtectedQuery(['pool-recommendation', sessionToken], sessionToken, ({ signal }) => api.getPoolRecommendation(sessionToken, signal), autoRefresh ? 60_000 : false);
-  const quantDecisionQuery = useProtectedQuery(['quant-decision', sessionToken], sessionToken, ({ signal }) => api.getQuantDecision(sessionToken, signal), autoRefresh ? 30_000 : false);
-  const actionDecisionQuery = useProtectedQuery(['action-decisions', sessionToken], sessionToken, ({ signal }) => api.getActionDecisions(sessionToken, signal), autoRefresh ? 30_000 : false);
+  const frameworkQuery = useProtectedQuery(['quant-framework', sessionToken], sessionToken, ({ signal }) => api.getQuantFramework(sessionToken, signal), autoRefresh ? 30_000 : false);
   const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
-  const dataQualityQuery = useProtectedQuery(['data-quality', sessionToken], sessionToken, ({ signal }) => api.getDataQuality(sessionToken, signal), autoRefresh ? 30_000 : false);
   const integrationsQuery = useProtectedQuery(['integrations', sessionToken], sessionToken, ({ signal }) => api.getIntegrations(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiStatusQuery = useProtectedQuery(['ai-status', sessionToken], sessionToken, ({ signal }) => api.getAiStatus(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiSummariesQuery = useProtectedQuery(['ai-summaries', sessionToken], sessionToken, ({ signal }) => api.getAiSummaries(sessionToken, signal), autoRefresh ? 60_000 : false);
 
-  const protectedErrors = [
-    sessionQuery.error,
-    marketFlowQuery.error,
-    poolRecommendationQuery.error,
-    quantDecisionQuery.error,
-    actionDecisionQuery.error,
-    positionsQuery.error,
-    dataQualityQuery.error,
-    integrationsQuery.error,
-    aiStatusQuery.error,
-    aiSummariesQuery.error
-  ].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, frameworkQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, marketFlowQuery, poolRecommendationQuery, quantDecisionQuery, actionDecisionQuery, positionsQuery, dataQualityQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
-  const firstLoad = Boolean(sessionToken) && [marketFlowQuery, quantDecisionQuery, actionDecisionQuery, positionsQuery].some((query) => query.isLoading);
+  const refreshing = [healthQuery, sessionQuery, frameworkQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const firstLoad = Boolean(sessionToken) && [frameworkQuery, positionsQuery].some((query) => query.isLoading);
 
   const clearSession = (openLogin = true) => {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -134,10 +114,9 @@ function App() {
 
   const forceRefreshMutation = useMutation({
     mutationFn: () => api.getMarketFlow(sessionToken, true),
-    onSuccess: (data) => {
-      queryClient.setQueryData(['market-flow', sessionToken], data);
-      invalidateTradingQueries(queryClient, sessionToken);
-      message.success('方向已刷新');
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quant-framework', sessionToken] });
+      message.success('量化链路已刷新');
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -196,9 +175,7 @@ function App() {
     message.success('已退出');
   };
 
-  const refreshAll = () => {
-    queryClient.invalidateQueries();
-  };
+  const refreshAll = () => queryClient.invalidateQueries();
 
   const savePosition = () => {
     const code = positionDraft.code.trim();
@@ -226,7 +203,7 @@ function App() {
           <span className="brand-mark"><LineChartOutlined /></span>
           <div>
             <Title level={4} className="brand-title">ETF Radar</Title>
-            <Text className="brand-subtitle">量化决策台</Text>
+            <Text className="brand-subtitle">量化框架</Text>
           </div>
         </div>
         <Space size="small" wrap className="top-actions">
@@ -242,23 +219,17 @@ function App() {
         </Space>
       </Header>
 
-      <Content className="content">
+      <Content className="content quant-content">
         {!sessionToken ? (
-          <section className="panel center-panel">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先登录" />
-          </section>
+          <section className="panel center-panel"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请先登录" /></section>
         ) : firstLoad ? (
-          <section className="panel center-panel"><Spin tip="加载量化结论" /></section>
+          <section className="panel center-panel"><Spin tip="加载量化链路" /></section>
         ) : (
-          <DecisionConsole
+          <QuantConsole
             health={healthQuery.data}
             session={sessionQuery.data}
-            marketFlow={marketFlowQuery.data}
-            poolRecommendation={poolRecommendationQuery.data}
-            quantDecision={quantDecisionQuery.data}
-            actionDecisions={actionDecisionQuery.data}
+            framework={frameworkQuery.data}
             positions={positionsQuery.data ?? []}
-            dataQuality={dataQualityQuery.data}
             integrations={integrationsQuery.data ?? []}
             aiStatus={aiStatusQuery.data}
             aiSummaries={aiSummariesQuery.data}
@@ -268,14 +239,14 @@ function App() {
             savingPosition={savePositionMutation.isPending}
             onDeletePosition={(code) => deletePositionMutation.mutate(code)}
             deletingPosition={deletePositionMutation.isPending}
-            deletingCode={deletePositionMutation.variables ?? null}
-            onRefreshDirection={() => forceRefreshMutation.mutate()}
-            refreshingDirection={forceRefreshMutation.isPending}
+            deletingCode={typeof deletePositionMutation.variables === 'string' ? deletePositionMutation.variables : null}
+            onRefreshFramework={() => forceRefreshMutation.mutate()}
+            refreshingFramework={forceRefreshMutation.isPending || frameworkQuery.isFetching}
             onToggleAi={(enabled) => aiToggleMutation.mutate(enabled)}
             togglingAi={aiToggleMutation.isPending}
             onGenerateAi={(kind) => aiGenerateMutation.mutate(kind)}
             generatingAi={aiGenerateMutation.isPending}
-            generatingKind={aiGenerateMutation.variables ?? null}
+            generatingKind={typeof aiGenerateMutation.variables === 'string' ? aiGenerateMutation.variables : null}
             errorMessage={protectedErrors.length ? getErrorMessage(protectedErrors[0]) : null}
           />
         )}
@@ -314,15 +285,11 @@ interface PositionDraft {
   note: string;
 }
 
-interface DecisionConsoleProps {
+interface QuantConsoleProps {
   health?: HealthResponse;
   session?: WebSessionInfo;
-  marketFlow?: MarketFlowResponse;
-  poolRecommendation?: PoolRecommendationResponse;
-  quantDecision?: QuantDecisionResponse;
-  actionDecisions?: ActionDecisionResponse;
+  framework?: QuantFrameworkResponse;
   positions: Position[];
-  dataQuality?: DataQualityResponse;
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
   aiSummaries?: AiSummaryReport;
@@ -333,8 +300,8 @@ interface DecisionConsoleProps {
   onDeletePosition: (code: string) => void;
   deletingPosition: boolean;
   deletingCode: string | null;
-  onRefreshDirection: () => void;
-  refreshingDirection: boolean;
+  onRefreshFramework: () => void;
+  refreshingFramework: boolean;
   onToggleAi: (enabled: boolean) => void;
   togglingAi: boolean;
   onGenerateAi: (kind: AiSummaryKind | string) => void;
@@ -343,45 +310,49 @@ interface DecisionConsoleProps {
   errorMessage: string | null;
 }
 
-function DecisionConsole(props: DecisionConsoleProps) {
-  const targetEtfs = useMemo(() => getTargetEtfs(props.quantDecision, props.poolRecommendation), [props.quantDecision, props.poolRecommendation]);
-  const positionCodes = new Set(props.positions.map((item) => item.code));
-  const positionActions = (props.actionDecisions?.items ?? []).filter((item) => item.has_position || positionCodes.has(item.code));
-  const monitorActions = (props.actionDecisions?.items ?? []).filter((item) => !item.has_position && !positionCodes.has(item.code));
-  const primaryAction = pickPrimaryAction(props.actionDecisions, props.positions);
-  const topDirection = props.marketFlow?.directions?.[0];
-  const warnings = [props.errorMessage, props.health?.last_warning, ...(props.quantDecision?.warnings ?? []), ...(props.marketFlow?.warnings ?? []), ...(props.poolRecommendation?.warnings ?? [])]
+function QuantConsole(props: QuantConsoleProps) {
+  const primary = useMemo(() => pickPrimaryExecution(props.framework, props.positions), [props.framework, props.positions]);
+  const selectedUniverse = (props.framework?.universe ?? []).filter((item) => item.selected);
+  const heldCodes = new Set(props.positions.map((item) => item.code));
+  const positionActions = (props.framework?.final_actions ?? []).filter((item) => item.has_position || heldCodes.has(item.code));
+  const warnings = [props.errorMessage, props.health?.last_warning, ...(props.framework?.warnings ?? [])]
     .filter((item): item is string => Boolean(item))
     .slice(0, 4);
 
   return (
-    <main className="decision-console">
+    <main className="decision-console quant-console">
       {warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
-      <section className="hero-panel">
+
+      <section className="hero-panel quant-hero">
         <div className="hero-copy">
-          <Text className="eyebrow">当前结论</Text>
-          <h1>{props.quantDecision?.conclusion ?? '暂无量化结论，先不做主动交易动作'}</h1>
+          <Text className="eyebrow">当前量化结论</Text>
+          <h1>{frameworkConclusion(props.framework, primary)}</h1>
           <Space size={[6, 6]} wrap>
-            <Tag color="blue">方向 {props.quantDecision?.direction.direction_label ?? topDirection?.direction_label ?? '-'}</Tag>
-            <Tag color={phaseColor(props.quantDecision?.direction.phase ?? topDirection?.state)}>{props.quantDecision?.direction.phase_label ?? marketStateLabel(topDirection?.state)}</Tag>
-            <Tag>置信 {confidenceLabel(props.quantDecision?.direction.confidence)}</Tag>
-            <Tag color={qualityGate(props.dataQuality).color}>数据 {qualityGate(props.dataQuality).label}</Tag>
+            <Tag color={primary.side === 'BUY' ? 'green' : primary.side === 'SELL' ? 'red' : 'orange'}>动作 {actionLabel(primary.action)}</Tag>
+            <Tag color={evidenceColor(props.framework?.validation.evidence_strength)}>证据 {evidenceLabel(props.framework?.validation.evidence_strength)}</Tag>
+            <Tag color={props.framework?.validation.live_trading_ready ? 'green' : 'red'}>{props.framework?.validation.live_trading_ready ? '可实盘' : '研究级'}</Tag>
+            <Tag>更新 {formatDateTime(props.framework?.generated_at)}</Tag>
           </Space>
         </div>
         <div className="hero-command">
-          <Text className="eyebrow">现在动作</Text>
-          <div className="command-action"><ActionTag action={primaryAction.action} side={primaryAction.side} /></div>
-          <Text>{primaryAction.note}</Text>
+          <Text className="eyebrow">执行指令</Text>
+          <div className="command-action"><ActionTag action={primary.action} side={primary.side} /></div>
+          <Text>{primary.note}</Text>
         </div>
       </section>
 
+      <section className="grid two-columns wide-left">
+        <ExecutionPanel items={props.framework?.execution_plan ?? []} primaryCode={primary.code} />
+        <ValidationPanel framework={props.framework} onRefresh={props.onRefreshFramework} loading={props.refreshingFramework} />
+      </section>
+
       <section className="grid two-columns">
-        <MainlinePanel marketFlow={props.marketFlow} quantDecision={props.quantDecision} onRefresh={props.onRefreshDirection} loading={props.refreshingDirection} />
-        <ActionPanel actionDecisions={props.actionDecisions} monitorActions={monitorActions} positions={props.positions} />
+        <PortfolioRiskPanel targets={props.framework?.portfolio_targets ?? []} risks={props.framework?.risk_adjustments ?? []} />
+        <UniversePanel items={selectedUniverse} allItems={props.framework?.universe ?? []} />
       </section>
 
       <section className="grid two-columns wide-left">
-        <TargetPoolPanel items={targetEtfs} poolRecommendation={props.poolRecommendation} />
+        <EvidencePanel features={props.framework?.features ?? []} insights={props.framework?.insights ?? []} />
         <PositionPanel
           positions={props.positions}
           actions={positionActions}
@@ -396,111 +367,186 @@ function DecisionConsole(props: DecisionConsoleProps) {
       </section>
 
       <section className="grid two-columns">
-        <EvidencePanel marketFlow={props.marketFlow} quantDecision={props.quantDecision} />
         <AiPanel status={props.aiStatus} report={props.aiSummaries} onToggle={props.onToggleAi} toggling={props.togglingAi} onGenerate={props.onGenerateAi} generating={props.generatingAi} generatingKind={props.generatingKind} />
+        <SystemPanel health={props.health} session={props.session} framework={props.framework} integrations={props.integrations} />
       </section>
-
-      <SystemFooter health={props.health} session={props.session} dataQuality={props.dataQuality} integrations={props.integrations} actionDecisions={props.actionDecisions} />
     </main>
   );
 }
 
-function MainlinePanel({ marketFlow, quantDecision, onRefresh, loading }: { marketFlow?: MarketFlowResponse; quantDecision?: QuantDecisionResponse; onRefresh: () => void; loading: boolean }) {
-  const top = marketFlow?.directions?.[0];
-  const scores = [
-    ['主线', quantDecision?.direction.mainline_probability ?? top?.mainline_probability],
-    ['驻留', quantDecision?.direction.residency_score ?? top?.residency_score],
-    ['承接', quantDecision?.direction.retention_score ?? top?.retention_score],
-    ['低吸', quantDecision?.direction.low_buy_readiness_score ?? top?.low_buy_readiness_score]
-  ];
+function ExecutionPanel({ items, primaryCode }: { items: QuantExecutionAdvice[]; primaryCode?: string | null }) {
+  const sorted = [...items].sort((a, b) => executionRank(a) - executionRank(b));
   return (
-    <Panel title="主线阶段" icon={<ThunderboltOutlined />} extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>刷新</Button>}>
-      <div className="direction-title">{quantDecision?.direction.direction_label ?? top?.direction_label ?? '-'}</div>
-      <Text className="muted">{quantDecision?.direction.operation ?? top?.capital_status ?? '等待方向确认'}</Text>
-      <div className="score-grid">
-        {scores.map(([label, value]) => <ScoreBox key={label} label={String(label)} value={typeof value === 'number' ? value : null} />)}
-      </div>
-      <div className="mini-list">
-        {(marketFlow?.directions ?? []).slice(0, 3).map((direction) => <DirectionRow key={direction.direction_key} direction={direction} />)}
+    <Panel title="执行计划" icon={<ThunderboltOutlined />} meta={`${items.length} 个标的`}>
+      <div className="execution-list">
+        {sorted.map((item) => <ExecutionCard key={item.code} item={item} primary={item.code === primaryCode} />)}
+        {!sorted.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行计划" />}
       </div>
     </Panel>
   );
 }
 
-function DirectionRow({ direction }: { direction: MarketDirection }) {
+function ExecutionCard({ item, primary }: { item: QuantExecutionAdvice; primary: boolean }) {
   return (
-    <div className="row-card">
-      <div>
-        <Text strong>{direction.direction_label}</Text>
-        <Text className="muted">{marketStateLabel(direction.state)} · {formatAmount(direction.total_amount)}</Text>
+    <article className={primary ? 'execution-card primary' : 'execution-card'}>
+      <div className="card-head">
+        <div>
+          <Text strong>{item.name}</Text>
+          <Text className="muted">{item.code} · {item.order_style}</Text>
+        </div>
+        <ActionTag action={item.action} side={item.side} />
       </div>
-      <Space size={4} wrap>
-        <ScoreText value={direction.mainline_probability} />
-        <PercentText value={direction.avg_change_pct} />
+      <div className="metric-grid execution-metrics">
+        <Metric label="目标仓位" value={formatPercentNumber(item.target_weight_pct)} />
+        <Metric label="仓位变化" value={formatDelta(item.position_delta_pct)} />
+        <Metric label="低吸区" value={priceRange(item.trigger_price_low, item.trigger_price_high)} />
+        <Metric label="回避价" value={formatPrice(item.avoid_above)} />
+        <Metric label="止盈" value={formatPrice(item.take_profit_price)} />
+        <Metric label="止损/防守" value={formatPrice(item.stop_price)} />
+      </div>
+      <TagList items={item.notes.slice(0, 4)} color="blue" />
+      <TagList items={item.blockers.slice(0, 4)} color="red" empty="没有执行阻断" />
+    </article>
+  );
+}
+
+function ValidationPanel({ framework, onRefresh, loading }: { framework?: QuantFrameworkResponse; onRefresh: () => void; loading: boolean }) {
+  const validation = framework?.validation;
+  const counts = framework ? [
+    ['Universe', framework.universe.length],
+    ['Features', framework.features.length],
+    ['Alpha', framework.insights.length],
+    ['Targets', framework.portfolio_targets.length],
+    ['Risk', framework.risk_adjustments.length],
+    ['Exec', framework.execution_plan.length]
+  ] : [];
+  return (
+    <Panel title="框架状态" icon={<CheckCircleOutlined />} meta={validation?.research_grade ? '研究级' : '-'} extra={<Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={onRefresh}>刷新链路</Button>}>
+      <div className="score-grid framework-counts">
+        {counts.map(([label, value]) => <ScoreBox key={String(label)} label={String(label)} value={Number(value)} />)}
+      </div>
+      <div className="pipeline-list">
+        {(framework?.architecture ?? []).map((stage, index) => <div className="pipeline-step" key={stage}><Tag color="blue">{index + 1}</Tag><Text>{stage}</Text></div>)}
+      </div>
+      <div className="evidence-columns validation-grid">
+        <div>
+          <Text className="metric-label">通过</Text>
+          <TagList items={validation?.passed.slice(0, 5) ?? []} color="green" />
+        </div>
+        <div>
+          <Text className="metric-label">阻断</Text>
+          <TagList items={validation?.blockers.slice(0, 5) ?? []} color="red" />
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function PortfolioRiskPanel({ targets, risks }: { targets: QuantPortfolioTarget[]; risks: QuantRiskAdjustment[] }) {
+  const riskByCode = new Map(risks.map((item) => [item.code, item]));
+  return (
+    <Panel title="组合与风控" icon={<SafetyCertificateOutlined />} meta="Portfolio + Risk">
+      <div className="mini-list">
+        {targets.map((target) => <PortfolioRiskRow key={target.code} target={target} risk={riskByCode.get(target.code)} />)}
+        {!targets.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无组合目标" />}
+      </div>
+    </Panel>
+  );
+}
+
+function PortfolioRiskRow({ target, risk }: { target: QuantPortfolioTarget; risk?: QuantRiskAdjustment }) {
+  return (
+    <div className="row-card quant-row">
+      <div>
+        <Text strong>{target.name}</Text>
+        <Text className="muted">{target.code} · {rebalanceLabel(target.rebalance_action)} · {target.target_reason}</Text>
+        <TagList items={(risk?.reasons ?? target.evidence).slice(0, 3)} color={risk?.blocked ? 'red' : 'blue'} />
+      </div>
+      <Space size={4} wrap className="row-actions">
+        <Tag color={riskColor(risk?.risk_level)}>{risk?.blocked ? '阻断' : riskLabel(risk?.risk_level)}</Tag>
+        <Tag>{formatPercentNumber(risk?.adjusted_target_weight_pct ?? target.target_weight_pct)}</Tag>
+        {risk?.position_delta_pct != null && <Tag color={risk.position_delta_pct < 0 ? 'red' : 'green'}>{formatDelta(risk.position_delta_pct)}</Tag>}
       </Space>
     </div>
   );
 }
 
-function ActionPanel({ actionDecisions, monitorActions, positions }: { actionDecisions?: ActionDecisionResponse; monitorActions: ActionDecisionItem[]; positions: Position[] }) {
-  const items = monitorActions.slice(0, 4);
+function UniversePanel({ items, allItems }: { items: QuantUniverseAsset[]; allItems: QuantUniverseAsset[] }) {
+  const visible = items.length ? items : allItems.slice(0, 6);
   return (
-    <Panel title="动作" icon={<SafetyCertificateOutlined />} meta={actionDecisions ? actionStatusLabel(actionDecisions.status) : '-'}>
-      <div className="rule-note">
-        {positions.length ? '已有持仓先按持仓风控处理，目标池变化只作为换仓证据。' : '空仓只看目标池和低吸触发，不追当日热点。'}
-      </div>
+    <Panel title="资产池" icon={<LineChartOutlined />} meta={`${visible.length}/${allItems.length}`}>
       <div className="mini-list">
-        {items.map((item) => <ActionRow item={item} key={item.code} />)}
-        {!items.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无监控动作" />}
+        {visible.slice(0, 8).map((item, index) => <UniverseRow key={`${item.asset_type}-${item.code ?? item.name}-${index}`} item={item} />)}
+        {!visible.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无资产池" />}
       </div>
     </Panel>
   );
 }
 
-function ActionRow({ item }: { item: ActionDecisionItem }) {
+function UniverseRow({ item }: { item: QuantUniverseAsset }) {
   return (
-    <div className="row-card">
+    <div className="row-card quant-row">
       <div>
         <Text strong>{item.name}</Text>
-        <Text className="muted">{item.code} · {item.execution_note}</Text>
+        <Text className="muted">{item.code ?? item.direction_key ?? '-'} · {assetTypeLabel(item.asset_type)} · {roleLabel(item.role)} · {item.reason}</Text>
       </div>
-      <ActionTag action={item.action} side={item.side} />
+      <Space size={4} wrap>
+        {item.rank != null && <Tag>#{item.rank}</Tag>}
+        <Tag color={item.selected ? 'green' : 'default'}>{item.selected ? '入池' : '观察'}</Tag>
+      </Space>
     </div>
   );
 }
 
-function TargetPoolPanel({ items, poolRecommendation }: { items: TargetEtf[]; poolRecommendation?: PoolRecommendationResponse }) {
+function EvidencePanel({ features, insights }: { features: QuantFeatureRow[]; insights: QuantInsight[] }) {
+  const topFeatures = [...features].sort((a, b) => b.score - a.score).slice(0, 5);
+  const topInsights = [...insights].sort((a, b) => b.confidence_score - a.confidence_score).slice(0, 5);
   return (
-    <Panel title="目标池" icon={<LineChartOutlined />} meta={poolRecommendation ? poolStatusLabel(poolRecommendation.status) : '-'}>
-      <div className="target-grid">
-        {items.slice(0, 3).map((item) => <TargetEtfCard key={item.code} item={item} />)}
-        {!items.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无目标ETF" />}
+    <Panel title="证据链" icon={<CheckCircleOutlined />} meta="Features + Alpha">
+      <div className="evidence-columns">
+        <div>
+          <Text className="metric-label">Alpha</Text>
+          <div className="mini-list">
+            {topInsights.map((item, index) => <InsightRow key={`${item.code ?? item.name}-${index}`} item={item} />)}
+          </div>
+        </div>
+        <div>
+          <Text className="metric-label">特征</Text>
+          <div className="mini-list">
+            {topFeatures.map((item, index) => <FeatureRow key={`${item.code ?? item.name}-${index}`} item={item} />)}
+          </div>
+        </div>
       </div>
     </Panel>
   );
 }
 
-function TargetEtfCard({ item }: { item: TargetEtf }) {
+function InsightRow({ item }: { item: QuantInsight }) {
   return (
-    <article className="target-card">
-      <div className="card-head">
-        <Space size={4} wrap>
-          <Tag color={item.role === 'backup' ? 'gold' : 'blue'}>{item.role === 'backup' ? '备选' : '主要'}</Tag>
-          <Tag>{item.directionLabel ?? '-'}</Tag>
-        </Space>
-        <ScoreText value={item.score} />
+    <div className="row-card compact-row">
+      <div>
+        <Text strong>{item.name}</Text>
+        <Text className="muted">{insightTypeLabel(item.insight_type)} · {item.horizon}</Text>
       </div>
-      <div className="card-name">{item.name}</div>
-      <Text className="muted">{item.code}</Text>
-      <div className="metric-grid">
-        <Metric label="现价" value={formatPrice(item.price)} />
-        <Metric label="溢价" value={<PercentText value={item.premiumPct} neutral />} />
-        <Metric label="低吸" value={item.buyLow != null || item.buyHigh != null ? `${formatPrice(item.buyLow)} - ${formatPrice(item.buyHigh)}` : entryBiasLabel(item.entryBias)} />
-        <Metric label="动作" value={<ActionTag action={item.action} side={item.side} />} />
+      <Space size={4} wrap>
+        <Tag color={directionColor(item.direction)}>{item.direction}</Tag>
+        <ScoreText value={item.confidence_score} />
+      </Space>
+    </div>
+  );
+}
+
+function FeatureRow({ item }: { item: QuantFeatureRow }) {
+  const keyMetrics = Object.entries(item.features).filter(([, value]) => typeof value === 'number' || typeof value === 'string').slice(0, 3);
+  return (
+    <div className="row-card compact-row">
+      <div>
+        <Text strong>{item.name}</Text>
+        <Text className="muted">{item.feature_set}</Text>
+        <Text className="muted">{keyMetrics.map(([key, value]) => `${key}: ${formatFeatureValue(value)}`).join(' · ')}</Text>
       </div>
-      <TagList items={item.reasons.slice(0, 3)} />
-      <TagList items={item.risks.slice(0, 2)} color="orange" />
-    </article>
+      <ScoreText value={item.score} />
+    </div>
   );
 }
 
@@ -516,7 +562,7 @@ function PositionPanel({ positions, actions, draft, setDraft, onSave, saving, on
       <Input className="position-note" value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="备注，可不填" />
       <div className="mini-list position-list">
         {positions.map((position) => <PositionRow key={position.code} position={position} action={actions.find((item) => item.code === position.code)} onDelete={onDelete} deleting={deleting && deletingCode === position.code} />)}
-        {!positions.length && <Alert type="info" showIcon message="当前空仓：只等待目标ETF低吸触发。" />}
+        {!positions.length && <Alert type="info" showIcon message="当前空仓：只等待量化链路给出低吸触发，不因热点追涨。" />}
       </div>
     </Panel>
   );
@@ -538,43 +584,10 @@ function PositionRow({ position, action, onDelete, deleting }: { position: Posit
   );
 }
 
-function EvidencePanel({ marketFlow, quantDecision }: { marketFlow?: MarketFlowResponse; quantDecision?: QuantDecisionResponse }) {
-  const direction = marketFlow?.directions?.[0];
-  const evidence = quantDecision?.direction.evidence?.length ? quantDecision.direction.evidence : direction?.evidence ?? [];
-  const risks = quantDecision?.direction.risk_flags?.length ? quantDecision.direction.risk_flags : direction?.risk_flags ?? [];
-  const stock = direction?.linked_stocks?.[0] ?? direction?.representative_stock;
-  return (
-    <Panel title="证据" icon={<CheckCircleOutlined />} meta={marketFlow ? formatDateTime(marketFlow.generated_at) : '-'}>
-      <div className="evidence-columns">
-        <div>
-          <Text className="metric-label">确认</Text>
-          <TagList items={evidence.slice(0, 6)} />
-        </div>
-        <div>
-          <Text className="metric-label">风险</Text>
-          <TagList items={risks.slice(0, 6)} color="orange" empty="暂无突出风险" />
-        </div>
-      </div>
-      {stock && (
-        <div className="strong-stock">
-          <Text className="metric-label">强股验证</Text>
-          <div className="row-card">
-            <div>
-              <Text strong>{stock.name}</Text>
-              <Text className="muted">{stock.code} · {stock.board_name ?? direction?.direction_label ?? '-'}</Text>
-            </div>
-            <Space size={4}><ScoreText value={stock.score} /><PercentText value={stock.change_pct} /></Space>
-          </div>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
 function AiPanel({ status, report, onToggle, toggling, onGenerate, generating, generatingKind }: { status?: AiStatus; report?: AiSummaryReport; onToggle: (enabled: boolean) => void; toggling: boolean; onGenerate: (kind: AiSummaryKind | string) => void; generating: boolean; generatingKind: AiSummaryKind | string | null }) {
   const latest = report?.summaries?.[0];
   return (
-    <Panel title="AI" icon={<BulbOutlined />} meta={status ? `${status.calls_used_today}/${status.daily_call_limit}` : '-'} extra={<Switch checked={Boolean(status?.enabled)} loading={toggling} onChange={onToggle} disabled={!status?.configured} checkedChildren="开" unCheckedChildren="关" />}>
+    <Panel title="AI 总结" icon={<BulbOutlined />} meta={status ? `${status.calls_used_today}/${status.daily_call_limit}` : '-'} extra={<Switch checked={Boolean(status?.enabled)} loading={toggling} onChange={onToggle} disabled={!status?.configured} checkedChildren="开" unCheckedChildren="关" />}>
       {latest ? (
         <div className="ai-card">
           <Text strong>{latest.title}</Text>
@@ -589,17 +602,19 @@ function AiPanel({ status, report, onToggle, toggling, onGenerate, generating, g
   );
 }
 
-function SystemFooter({ health, session, dataQuality, integrations, actionDecisions }: { health?: HealthResponse; session?: WebSessionInfo; dataQuality?: DataQualityResponse; integrations: IntegrationStatus[]; actionDecisions?: ActionDecisionResponse }) {
-  const gate = qualityGate(dataQuality);
+function SystemPanel({ health, session, framework, integrations }: { health?: HealthResponse; session?: WebSessionInfo; framework?: QuantFrameworkResponse; integrations: IntegrationStatus[] }) {
   const okIntegrations = integrations.filter((item) => item.ok).length;
   return (
-    <section className="system-strip">
-      <StatusMetric icon={<ApiOutlined />} label="服务" value={health?.ok ? '在线' : '异常'} color={health?.ok ? 'green' : 'red'} />
-      <StatusMetric icon={<SafetyCertificateOutlined />} label="数据" value={gate.label} color={gate.color} />
-      <StatusMetric icon={<ThunderboltOutlined />} label="动作域" value={actionDecisions?.scope === 'fixed_pool_plus_positions' ? '监控+持仓' : actionDecisions?.scope ?? '-'} />
-      <StatusMetric icon={<CheckCircleOutlined />} label="基础设施" value={`${okIntegrations}/${integrations.length || 0}`} />
-      <StatusMetric icon={<UserOutlined />} label="会话" value={session?.username ?? '-'} />
-    </section>
+    <Panel title="系统" icon={<ApiOutlined />} meta="运行状态">
+      <div className="system-strip embedded">
+        <StatusMetric icon={<ApiOutlined />} label="服务" value={health?.ok ? '在线' : '异常'} color={health?.ok ? 'green' : 'red'} />
+        <StatusMetric icon={<SafetyCertificateOutlined />} label="等级" value={framework?.validation.research_grade ? '研究级' : '-'} color="orange" />
+        <StatusMetric icon={<ThunderboltOutlined />} label="实盘" value={framework?.validation.live_trading_ready ? '可用' : '未就绪'} color={framework?.validation.live_trading_ready ? 'green' : 'red'} />
+        <StatusMetric icon={<CheckCircleOutlined />} label="基础设施" value={`${okIntegrations}/${integrations.length || 0}`} />
+        <StatusMetric icon={<UserOutlined />} label="会话" value={session?.username ?? '-'} />
+      </div>
+      <TagList items={framework?.validation.required_upgrades.slice(0, 4) ?? []} color="orange" empty="暂无升级项" />
+    </Panel>
   );
 }
 
@@ -663,85 +678,37 @@ function SessionBadge({ session, loading, hasToken }: { session?: WebSessionInfo
   return <Badge status="success" text={session.username} />;
 }
 
-interface TargetEtf {
-  code: string;
-  name: string;
-  role: string | null;
-  action: string;
-  side: string;
-  score: number;
-  directionLabel: string | null;
-  price: number | null;
-  premiumPct: number | null;
-  entryBias: string | null;
-  buyLow: number | null;
-  buyHigh: number | null;
-  reasons: string[];
-  risks: string[];
+function pickPrimaryExecution(framework?: QuantFrameworkResponse, positions: Position[] = []) {
+  const items = framework?.execution_plan ?? [];
+  const priority = items.find((item) => item.side === 'SELL') ?? items.find((item) => item.side === 'BUY') ?? items.find((item) => item.side === 'HOLD') ?? items[0];
+  if (priority) {
+    return {
+      code: priority.code,
+      action: priority.action,
+      side: priority.side,
+      note: priority.blockers[0] ?? priority.notes[0] ?? priority.order_style
+    };
+  }
+  return { code: null, action: 'WAIT', side: 'WAIT', note: positions.length ? '等待持仓风控信号。' : '空仓等待低吸触发。' };
 }
 
-function getTargetEtfs(quant?: QuantDecisionResponse, pool?: PoolRecommendationResponse): TargetEtf[] {
-  const poolItems = (pool?.items ?? [])
-    .filter((item) => item.recommended_role)
-    .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
-  if (poolItems.length) return poolItems.map(targetFromPoolItem);
-  return (quant?.etfs ?? []).slice(0, 3).map(targetFromQuantEtf);
+function frameworkConclusion(framework: QuantFrameworkResponse | undefined, primary: ReturnType<typeof pickPrimaryExecution>): string {
+  if (!framework) return '暂无量化链路，先不做交易动作';
+  if (!framework.validation.live_trading_ready) {
+    if (primary.side === 'SELL') return `研究级信号触发风控优先：${primary.note}`;
+    if (primary.side === 'BUY') return `研究级信号出现买入触发：${primary.note}`;
+    if (primary.side === 'HOLD') return `研究级信号建议持有跟踪：${primary.note}`;
+    return `当前无买入触发，系统保持等待：${primary.note}`;
+  }
+  return primary.note;
 }
 
-function targetFromPoolItem(item: PoolRecommendationItem): TargetEtf {
-  return {
-    code: item.code,
-    name: item.name,
-    role: item.recommended_role,
-    action: item.action,
-    side: item.action === 'promote' ? 'BUY' : item.action === 'replace_candidate' ? 'SELL' : 'WAIT',
-    score: item.score,
-    directionLabel: item.direction_label,
-    price: item.price,
-    premiumPct: item.premium_pct,
-    entryBias: item.entry_bias,
-    buyLow: null,
-    buyHigh: null,
-    reasons: item.reasons,
-    risks: item.risk_flags
-  };
-}
-
-function targetFromQuantEtf(item: QuantEtfDecision): TargetEtf {
-  return {
-    code: item.code,
-    name: item.name,
-    role: item.role,
-    action: item.action,
-    side: quantActionSide(item.action),
-    score: item.score,
-    directionLabel: item.direction_label,
-    price: item.price,
-    premiumPct: null,
-    entryBias: null,
-    buyLow: item.buy_zone_low,
-    buyHigh: item.buy_zone_high,
-    reasons: item.reasons,
-    risks: item.risk_flags
-  };
-}
-
-function pickPrimaryAction(decisions?: ActionDecisionResponse, positions: Position[] = []) {
-  const items = decisions?.items ?? [];
-  const executable = items.find((item) => item.side === 'SELL') ?? items.find((item) => item.side === 'BUY');
-  if (executable) return { action: executable.action, side: executable.side, note: executable.execution_note };
-  const held = items.find((item) => item.has_position || positions.some((position) => position.code === item.code));
-  if (held) return { action: held.action, side: held.side, note: held.execution_note };
-  const watch = items[0];
-  if (watch) return { action: watch.action, side: watch.side, note: watch.execution_note };
-  return { action: 'WAIT', side: 'WAIT', note: positions.length ? '等待持仓动作信号。' : '空仓等待目标ETF低吸触发。' };
-}
-
-function qualityGate(dataQuality?: DataQualityResponse) {
-  if (!dataQuality) return { label: '无数据', color: 'default' };
-  if (dataQuality.blocked_codes.length || dataQuality.overall_score < 70) return { label: '阻断', color: 'red' };
-  if (dataQuality.warnings.length || dataQuality.overall_score < 90) return { label: '谨慎', color: 'orange' };
-  return { label: '可信', color: 'green' };
+function executionRank(item: QuantExecutionAdvice): number {
+  if (item.side === 'SELL') return 0;
+  if (item.side === 'BUY') return 1;
+  if (item.side === 'HOLD') return 2;
+  if (item.blockers.length) return 3;
+  return 4;
 }
 
 function actionLabel(value: string): string {
@@ -759,10 +726,9 @@ function actionLabel(value: string): string {
     WAIT_DATA: '等数据',
     AVOID: '回避',
     WAIT: '等待',
-    promote: '纳入目标',
-    replace_candidate: '替换候选',
-    watch: '观察',
-    keep: '保留'
+    WATCH: '观察',
+    BUY: '买入',
+    SELL: '卖出'
   };
   return map[value] ?? value;
 }
@@ -772,46 +738,68 @@ function actionColor(side: string): string {
   return map[side] ?? 'default';
 }
 
-function actionStatusLabel(value: string): string {
-  const map: Record<string, string> = { risk_exit: '风险离场', sell_or_reduce: '卖出/减仓', buy_available: '可买入', wait_low_buy: '等待低吸', wait: '等待' };
-  return map[value] ?? value;
-}
-
-function poolStatusLabel(value: string): string {
-  const map: Record<string, string> = { keep: '保持', partial_rotate: '部分更新', rotate: '需要更新', no_recommendation: '暂无建议' };
-  return map[value] ?? value;
-}
-
-function marketStateLabel(value?: string): string {
-  const map: Record<string, string> = { confirmed_mainline: '确认主线', candidate: '候选主线', hot_today: '当日热点', weakening: '弱化', watch_direction: '观察', weak_direction: '弱方向' };
-  return value ? map[value] ?? value : '-';
-}
-
-function phaseColor(value?: string | null): string {
-  if (!value) return 'default';
-  if (value.includes('main_up') || value === 'confirmed_mainline') return 'green';
-  if (value === 'candidate') return 'blue';
-  if (value === 'hot_today' || value === 'overheated') return 'orange';
-  if (value === 'weakening' || value === 'weak_direction') return 'red';
-  return 'default';
-}
-
-function confidenceLabel(value?: string | null): string {
+function evidenceLabel(value?: string): string {
   const map: Record<string, string> = { high: '高', medium: '中', 'medium-low': '中低', low: '低' };
   return value ? map[value] ?? value : '-';
 }
 
-function entryBiasLabel(value?: string | null): string {
-  const map: Record<string, string> = { watch_low_buy: '低吸观察', pullback_watch: '回踩观察', direction_hot_wait_pullback: '偏热等回落', avoid_premium: '溢价回避', wait: '等待' };
+function evidenceColor(value?: string): string {
+  if (value === 'high') return 'green';
+  if (value === 'medium') return 'blue';
+  if (value === 'medium-low') return 'orange';
+  return 'red';
+}
+
+function riskLabel(value?: string): string {
+  const map: Record<string, string> = { low: '低风险', medium: '中风险', high: '高风险' };
   return value ? map[value] ?? value : '-';
 }
 
-function quantActionSide(action: string): string {
-  if (action.startsWith('SELL') || action === 'REDUCE_OR_HOLD_TIGHT' || action === 'replace_candidate') return 'SELL';
-  if (action.startsWith('BUY') || action === 'promote') return 'BUY';
-  if (action === 'AVOID') return 'AVOID';
-  if (action === 'HOLD' || action === 'HOLD_WATCH') return 'HOLD';
-  return 'WAIT';
+function riskColor(value?: string): string {
+  if (value === 'high') return 'red';
+  if (value === 'medium') return 'orange';
+  if (value === 'low') return 'green';
+  return 'default';
+}
+
+function rebalanceLabel(value: string): string {
+  const map: Record<string, string> = {
+    open_first_batch: '首仓',
+    wait_for_trigger: '等触发',
+    watch_for_entry: '观察入场',
+    hold_or_add_under_cap: '持有/限额加仓',
+    exit: '离场',
+    take_profit_reduce: '止盈减仓',
+    take_profit_trim: '止盈兑现',
+    risk_trim: '风险减仓',
+    keep_existing_position: '保留持仓',
+    avoid: '回避',
+    wait_data: '等数据',
+    watch: '观察'
+  };
+  return map[value] ?? value;
+}
+
+function assetTypeLabel(value: string): string {
+  const map: Record<string, string> = { direction: '方向', etf: 'ETF', etf_action: '动作' };
+  return map[value] ?? value;
+}
+
+function roleLabel(value: string): string {
+  const map: Record<string, string> = { mainline_candidate: '主线候选', monitor: '监控', main: '主要', backup: '备选', watch: '观察', held_position: '持仓' };
+  return map[value] ?? value;
+}
+
+function insightTypeLabel(value: string): string {
+  const map: Record<string, string> = { mainline_regime: '主线阶段', carrier_alpha: 'ETF Alpha', position_management: '持仓管理' };
+  return map[value] ?? value;
+}
+
+function directionColor(value: string): string {
+  if (value === 'UP') return 'green';
+  if (value === 'DOWN') return 'red';
+  if (value === 'FLAT') return 'orange';
+  return 'default';
 }
 
 function scoreColor(value: number): string {
@@ -821,12 +809,19 @@ function scoreColor(value: number): string {
   return '#dc2626';
 }
 
-function formatAmount(value: number | null | undefined): string {
+function formatPercentNumber(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '-';
-  const abs = Math.abs(value);
-  if (abs >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
-  if (abs >= 10_000) return `${(value / 10_000).toFixed(1)}万`;
-  return value.toFixed(0);
+  return `${value.toFixed(1)}%`;
+}
+
+function formatDelta(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return `${value > 0 ? '+' : ''}${value.toFixed(0)}%`;
+}
+
+function priceRange(low: number | null | undefined, high: number | null | undefined): string {
+  if (low == null && high == null) return '-';
+  return `${formatPrice(low)} - ${formatPrice(high)}`;
 }
 
 function formatPrice(value: number | null | undefined): string {
@@ -834,10 +829,18 @@ function formatPrice(value: number | null | undefined): string {
   return value.toFixed(3);
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value?: string | null): string {
+  if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function formatFeatureValue(value: unknown): string {
+  if (typeof value === 'number') return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2);
+  if (typeof value === 'string') return value;
+  if (value == null) return '-';
+  return String(value);
 }
 
 function getErrorMessage(error: unknown): string {

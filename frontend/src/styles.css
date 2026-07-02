@@ -382,7 +382,8 @@ body {
   .two-columns,
   .two-columns.wide-left,
   .target-grid,
-  .system-strip {
+  .system-strip,
+  .system-strip.embedded {
     grid-template-columns: 1fr;
   }
 
@@ -448,6 +449,11 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .execution-metrics,
+  .system-strip.embedded {
+    grid-template-columns: 1fr;
+  }
+
   .panel-head,
   .row-card,
   .card-head {
@@ -458,4 +464,88 @@ body {
   .score-box strong {
     font-size: 20px;
   }
+}
+
+
+.quant-content {
+  max-width: 1420px;
+}
+
+.quant-console .hero-panel {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.quant-console .hero-command {
+  border-color: rgba(22, 163, 74, 0.2);
+}
+
+.execution-list {
+  display: grid;
+  gap: 10px;
+}
+
+.execution-card {
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.execution-card.primary {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.execution-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px 0;
+}
+
+.framework-counts {
+  margin-top: 0;
+}
+
+.pipeline-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.pipeline-step {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+.validation-grid {
+  margin-top: 12px;
+}
+
+.quant-row .ant-space,
+.row-actions {
+  justify-content: flex-end;
+}
+
+.compact-row {
+  padding: 8px;
+}
+
+.compact-row .muted + .muted {
+  margin-top: 0;
+}
+
+.system-strip.embedded {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }

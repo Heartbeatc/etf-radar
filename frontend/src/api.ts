@@ -14,6 +14,7 @@ import type {
   Position,
   PositionInput,
   QuantDecisionResponse,
+  QuantFrameworkResponse,
   RiskResponse,
   WebLoginResponse,
   WebSessionInfo
@@ -97,6 +98,8 @@ export const api = {
     requestJson<PoolRecommendationResponse>('/api/v1/pool-recommendation', { token, signal }),
   getQuantDecision: (token: string, signal?: AbortSignal) =>
     requestJson<QuantDecisionResponse>('/api/v1/quant-decision', { token, signal }),
+  getQuantFramework: (token: string, signal?: AbortSignal) =>
+    requestJson<QuantFrameworkResponse>('/api/v1/quant-framework', { token, signal }),
   getActionDecisions: (token: string, signal?: AbortSignal) =>
     requestJson<ActionDecisionResponse>('/api/v1/action-decisions', { token, signal }),
   getPositions: (token: string, signal?: AbortSignal) => requestJson<Position[]>('/api/v1/positions', { token, signal }),

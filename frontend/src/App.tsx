@@ -42,6 +42,7 @@ import type {
   QuantFeatureRow,
   QuantFrameworkResponse,
   QuantInsight,
+  QuantValidationReport,
   QuantPortfolioTarget,
   QuantRiskAdjustment,
   QuantUniverseAsset,
@@ -74,14 +75,15 @@ function App() {
   });
   const sessionQuery = useProtectedQuery(['auth-session', sessionToken], sessionToken, ({ signal }) => api.getSession(sessionToken, signal), autoRefresh ? 60_000 : false);
   const frameworkQuery = useProtectedQuery(['quant-framework', sessionToken], sessionToken, ({ signal }) => api.getQuantFramework(sessionToken, signal), autoRefresh ? 30_000 : false);
+  const quantValidationQuery = useProtectedQuery(['quant-validation', sessionToken], sessionToken, ({ signal }) => api.getQuantValidation(sessionToken, signal), autoRefresh ? 60_000 : false);
   const positionsQuery = useProtectedQuery(['positions', sessionToken], sessionToken, ({ signal }) => api.getPositions(sessionToken, signal), autoRefresh ? 30_000 : false);
   const integrationsQuery = useProtectedQuery(['integrations', sessionToken], sessionToken, ({ signal }) => api.getIntegrations(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiStatusQuery = useProtectedQuery(['ai-status', sessionToken], sessionToken, ({ signal }) => api.getAiStatus(sessionToken, signal), autoRefresh ? 60_000 : false);
   const aiSummariesQuery = useProtectedQuery(['ai-summaries', sessionToken], sessionToken, ({ signal }) => api.getAiSummaries(sessionToken, signal), autoRefresh ? 60_000 : false);
 
-  const protectedErrors = [sessionQuery.error, frameworkQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
+  const protectedErrors = [sessionQuery.error, frameworkQuery.error, quantValidationQuery.error, positionsQuery.error, integrationsQuery.error, aiStatusQuery.error, aiSummariesQuery.error].filter(Boolean);
   const unauthorized = protectedErrors.some((error) => error instanceof ApiError && error.status === 401);
-  const refreshing = [healthQuery, sessionQuery, frameworkQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
+  const refreshing = [healthQuery, sessionQuery, frameworkQuery, quantValidationQuery, positionsQuery, integrationsQuery, aiStatusQuery, aiSummariesQuery].some((query) => query.isFetching);
   const firstLoad = Boolean(sessionToken) && [frameworkQuery, positionsQuery].some((query) => query.isLoading);
 
   const clearSession = (openLogin = true) => {
@@ -229,6 +231,7 @@ function App() {
             health={healthQuery.data}
             session={sessionQuery.data}
             framework={frameworkQuery.data}
+            quantValidation={quantValidationQuery.data}
             positions={positionsQuery.data ?? []}
             integrations={integrationsQuery.data ?? []}
             aiStatus={aiStatusQuery.data}
@@ -289,6 +292,7 @@ interface QuantConsoleProps {
   health?: HealthResponse;
   session?: WebSessionInfo;
   framework?: QuantFrameworkResponse;
+  quantValidation?: QuantValidationReport;
   positions: Position[];
   integrations: IntegrationStatus[];
   aiStatus?: AiStatus;
@@ -354,6 +358,7 @@ function QuantConsole(props: QuantConsoleProps) {
           {focusItems.map((item, index) => <TradeFocusCard key={item.code} item={item} index={index} primary={item.code === primary.code} />)}
           {!focusItems.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无交易候选" />}
         </div>
+        <SignalValidationStrip report={props.quantValidation} />
       </section>
 
       <section className="support-grid">
@@ -413,6 +418,24 @@ function TradeFocusCard({ item, index, primary }: { item: QuantExecutionAdvice; 
 
 function DecisionMetric({ label, value }: { label: string; value: ReactNode }) {
   return <div className="decision-metric"><Text>{label}</Text><strong>{value}</strong></div>;
+}
+
+function SignalValidationStrip({ report }: { report?: QuantValidationReport }) {
+  const t3 = report?.horizon_metrics.find((item) => item.horizon_days === 3);
+  const state = !report || !t3 || t3.resolved_count < 20 ? '样本不足' : evidenceLabel(report.evidence_strength);
+  return (
+    <div className="validation-strip">
+      <DecisionMetric label="账本记录" value={report ? report.total_records.toFixed(0) : '-'} />
+      <DecisionMetric label="验证假设" value={report ? report.actionable_records.toFixed(0) : '-'} />
+      <DecisionMetric label="T+3已验证" value={t3 ? `${t3.resolved_count}/${t3.sample_count}` : '-'} />
+      <DecisionMetric label="T+3胜率" value={formatPercentNumber(t3?.win_rate_pct)} />
+      <DecisionMetric label="T+3均值" value={formatSignedPercent(t3?.avg_forward_return_pct)} />
+      <div className="validation-note">
+        <Tag color={evidenceColor(report?.evidence_strength)}>{state}</Tag>
+        <Text className="muted">{report?.warnings[0] ?? '信号验证账本会随系统运行自动积累。'}</Text>
+      </div>
+    </div>
+  );
 }
 
 function ValidationPanel({ framework, onRefresh, loading }: { framework?: QuantFrameworkResponse; onRefresh: () => void; loading: boolean }) {
@@ -821,6 +844,11 @@ function scoreColor(value: number): string {
 function formatPercentNumber(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '-';
   return `${value.toFixed(1)}%`;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
 function formatDelta(value: number | null | undefined): string {

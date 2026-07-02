@@ -430,6 +430,62 @@ export interface QuantFrameworkValidation {
   required_upgrades: string[];
 }
 
+export interface QuantSignalRecord {
+  id: number;
+  signal_at: string;
+  code: string;
+  name: string;
+  side: string;
+  action: string;
+  urgency: string;
+  target_weight_pct: number | null;
+  current_price: number | null;
+  trigger_price_low: number | null;
+  trigger_price_high: number | null;
+  stop_price: number | null;
+  take_profit_price: number | null;
+  evidence_strength: string;
+  live_trading_ready: boolean;
+  blocker_count: number;
+  signal_key: string;
+  payload: Record<string, unknown>;
+}
+
+export interface QuantForwardMetric {
+  horizon_days: number;
+  sample_count: number;
+  resolved_count: number;
+  pending_count: number;
+  win_rate_pct: number | null;
+  avg_forward_return_pct: number | null;
+  median_forward_return_pct: number | null;
+}
+
+export interface QuantCodeValidationItem {
+  code: string;
+  name: string;
+  last_signal_at: string | null;
+  last_side: string | null;
+  last_action: string | null;
+  actionable_count: number;
+  resolved_3d: number;
+  win_rate_3d_pct: number | null;
+  avg_return_3d_pct: number | null;
+}
+
+export interface QuantValidationReport {
+  generated_at: string;
+  total_records: number;
+  actionable_records: number;
+  evidence_strength: string;
+  live_trading_ready: boolean;
+  horizon_metrics: QuantForwardMetric[];
+  by_code: QuantCodeValidationItem[];
+  recent_records: QuantSignalRecord[];
+  warnings: string[];
+  assumptions: string[];
+}
+
 export interface QuantFrameworkResponse {
   generated_at: string;
   market_status: string;

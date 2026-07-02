@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, SignalRecord, SourceStatus, TradePlan
+from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
 
 
 class Store:
@@ -84,6 +84,30 @@ class Store:
                 );
                 create index if not exists idx_signal_history_code_time on signal_history(code, signal_at desc);
                 create index if not exists idx_signal_history_signal_time on signal_history(signal, signal_at desc);
+
+                create table if not exists quant_signal_history (
+                    id integer primary key autoincrement,
+                    signal_at text not null,
+                    code text not null,
+                    name text not null,
+                    side text not null,
+                    action text not null,
+                    urgency text not null,
+                    target_weight_pct real,
+                    current_price real,
+                    trigger_price_low real,
+                    trigger_price_high real,
+                    stop_price real,
+                    take_profit_price real,
+                    evidence_strength text not null,
+                    live_trading_ready integer not null,
+                    blocker_count integer not null,
+                    signal_key text not null,
+                    payload text not null
+                );
+                create index if not exists idx_quant_signal_code_time on quant_signal_history(code, signal_at desc);
+                create index if not exists idx_quant_signal_side_time on quant_signal_history(side, signal_at desc);
+                create index if not exists idx_quant_signal_key_time on quant_signal_history(signal_key, signal_at desc);
 
                 create table if not exists alert_events (
                     id integer primary key autoincrement,
@@ -275,6 +299,80 @@ class Store:
             conn.execute(
                 "delete from signal_history where id not in (select id from signal_history order by signal_at desc limit 50000)"
             )
+
+    def save_quant_framework_signals(self, report: QuantFrameworkResponse, dedupe_minutes: int = 20) -> int:
+        signal_at = report.generated_at.isoformat()
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max(1, dedupe_minutes))).isoformat()
+        action_by_code = {item.code: item for item in report.final_actions}
+        inserted = 0
+        with self._lock, self._connect() as conn:
+            for advice in report.execution_plan:
+                action = action_by_code.get(advice.code)
+                signal_key = _quant_signal_key(advice.model_dump(), report.validation.evidence_strength)
+                row = conn.execute(
+                    """
+                    select 1 from quant_signal_history
+                    where code = ? and signal_key = ? and signal_at >= ?
+                    limit 1
+                    """,
+                    (advice.code, signal_key, cutoff),
+                ).fetchone()
+                if row:
+                    continue
+                payload = {
+                    "advice": advice.model_dump(mode="json"),
+                    "action": action.model_dump(mode="json") if action else None,
+                    "validation": report.validation.model_dump(mode="json"),
+                    "market_status": report.market_status,
+                }
+                conn.execute(
+                    """
+                    insert into quant_signal_history(
+                        signal_at, code, name, side, action, urgency, target_weight_pct, current_price,
+                        trigger_price_low, trigger_price_high, stop_price, take_profit_price,
+                        evidence_strength, live_trading_ready, blocker_count, signal_key, payload
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        signal_at,
+                        advice.code,
+                        advice.name,
+                        advice.side,
+                        advice.action,
+                        advice.urgency,
+                        advice.target_weight_pct,
+                        action.current_price if action else None,
+                        advice.trigger_price_low,
+                        advice.trigger_price_high,
+                        advice.stop_price,
+                        advice.take_profit_price,
+                        report.validation.evidence_strength,
+                        int(report.validation.live_trading_ready),
+                        len(advice.blockers),
+                        signal_key,
+                        json.dumps(payload, ensure_ascii=False),
+                    ),
+                )
+                inserted += 1
+            conn.execute(
+                "delete from quant_signal_history where id not in (select id from quant_signal_history order by signal_at desc limit 50000)"
+            )
+        return inserted
+
+    def quant_signal_history(self, code: str | None = None, limit: int = 1000) -> list[QuantSignalRecord]:
+        limit = max(1, min(limit, 5000))
+        params: tuple[Any, ...]
+        sql = "select * from quant_signal_history"
+        if code:
+            sql += " where code = ?"
+            params = (code,)
+        else:
+            params = ()
+        sql += " order by signal_at desc limit ?"
+        params = (*params, limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_quant_signal_record(row) for row in rows]
 
     def previous_signals(self, codes: list[str]) -> dict[str, str]:
         result: dict[str, str] = {}
@@ -493,6 +591,52 @@ def _signal_record(row: sqlite3.Row) -> SignalRecord:
     )
 
 
+
+def _quant_signal_record(row: sqlite3.Row) -> QuantSignalRecord:
+    return QuantSignalRecord(
+        id=row["id"],
+        signal_at=datetime.fromisoformat(row["signal_at"]),
+        code=row["code"],
+        name=row["name"],
+        side=row["side"],
+        action=row["action"],
+        urgency=row["urgency"],
+        target_weight_pct=row["target_weight_pct"],
+        current_price=row["current_price"],
+        trigger_price_low=row["trigger_price_low"],
+        trigger_price_high=row["trigger_price_high"],
+        stop_price=row["stop_price"],
+        take_profit_price=row["take_profit_price"],
+        evidence_strength=row["evidence_strength"],
+        live_trading_ready=bool(row["live_trading_ready"]),
+        blocker_count=row["blocker_count"],
+        signal_key=row["signal_key"],
+        payload=json.loads(row["payload"]),
+    )
+
+
+def _quant_signal_key(payload: dict[str, Any], evidence_strength: str) -> str:
+    values = [
+        payload.get("code"),
+        payload.get("side"),
+        payload.get("action"),
+        payload.get("urgency"),
+        _round_key(payload.get("target_weight_pct")),
+        _round_key(payload.get("trigger_price_low")),
+        _round_key(payload.get("trigger_price_high")),
+        _round_key(payload.get("stop_price")),
+        _round_key(payload.get("take_profit_price")),
+        len(payload.get("blockers") or []),
+        evidence_strength,
+    ]
+    return "|".join(str(value) for value in values)
+
+
+def _round_key(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.3f}"
+    return "-" if value is None else str(value)
+
 def _ai_summary_item(row: sqlite3.Row) -> AiSummaryItem:
     return AiSummaryItem(
         kind=row["kind"],
@@ -516,6 +660,7 @@ def _ai_summary_title(kind: str) -> str:
     }.get(kind, kind)
 
 
+def _alert_event(row: sqlite3.Row) -> AlertEvent:
     return AlertEvent(
         id=row["id"],
         code=row["code"],

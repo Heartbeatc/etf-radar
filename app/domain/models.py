@@ -648,6 +648,62 @@ class QuantFrameworkValidation(BaseModel):
     required_upgrades: list[str]
 
 
+class QuantSignalRecord(BaseModel):
+    id: int
+    signal_at: datetime
+    code: str
+    name: str
+    side: str
+    action: str
+    urgency: str
+    target_weight_pct: float | None = None
+    current_price: float | None = None
+    trigger_price_low: float | None = None
+    trigger_price_high: float | None = None
+    stop_price: float | None = None
+    take_profit_price: float | None = None
+    evidence_strength: str
+    live_trading_ready: bool
+    blocker_count: int
+    signal_key: str
+    payload: dict[str, Any]
+
+
+class QuantForwardMetric(BaseModel):
+    horizon_days: int
+    sample_count: int
+    resolved_count: int
+    pending_count: int
+    win_rate_pct: float | None = None
+    avg_forward_return_pct: float | None = None
+    median_forward_return_pct: float | None = None
+
+
+class QuantCodeValidationItem(BaseModel):
+    code: str
+    name: str
+    last_signal_at: datetime | None = None
+    last_side: str | None = None
+    last_action: str | None = None
+    actionable_count: int
+    resolved_3d: int
+    win_rate_3d_pct: float | None = None
+    avg_return_3d_pct: float | None = None
+
+
+class QuantValidationReport(BaseModel):
+    generated_at: datetime
+    total_records: int
+    actionable_records: int
+    evidence_strength: str
+    live_trading_ready: bool
+    horizon_metrics: list[QuantForwardMetric]
+    by_code: list[QuantCodeValidationItem]
+    recent_records: list[QuantSignalRecord]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class QuantFrameworkResponse(BaseModel):
     generated_at: datetime
     market_status: str

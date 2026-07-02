@@ -55,8 +55,9 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
             "web_auth_enabled": settings.web_auth_enabled,
             "last_error": runtime._last_error,
             "last_warning": runtime._last_warning,
-            "tracked": settings.exposed_codes,
+            "tracked": runtime.trade_codes(),
             "benchmarks": settings.benchmark_code_list,
+            "monitored": runtime.monitor_codes(),
             "snapshot_count": len(latest),
             "source_bad_count": len(bad),
             "source_bad_codes": bad,
@@ -105,7 +106,7 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
 
     @app.get("/api/v1/data-quality", response_model=DataQualityReport, dependencies=PROTECTED)
     async def data_quality() -> DataQualityReport:
-        return build_data_quality_report(settings, runtime.store.latest_snapshots())
+        return build_data_quality_report(settings, runtime.store.latest_snapshots(), codes=runtime.monitor_codes(), roles=runtime.roles())
 
     @app.get("/api/v1/discovery", response_model=DiscoveryResponse, dependencies=PROTECTED)
     async def discovery(
@@ -235,9 +236,10 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
 
     @app.put("/api/v1/positions/{code}", response_model=Position, dependencies=PROTECTED)
     async def upsert_position(code: str, position: PositionInput) -> Position:
-        if code not in settings.exposed_codes:
-            raise HTTPException(status_code=400, detail=f"{code} is not in exposed ETF list")
-        return runtime.store.upsert_position(code, position)
+        normalized = code.strip()
+        if not normalized.isdigit() or len(normalized) != 6:
+            raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
+        return runtime.store.upsert_position(normalized, position)
 
     @app.delete("/api/v1/positions/{code}", dependencies=PROTECTED)
     async def delete_position(code: str) -> dict:

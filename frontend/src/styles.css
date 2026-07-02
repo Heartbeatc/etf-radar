@@ -189,6 +189,23 @@ body {
   white-space: nowrap;
 }
 
+
+.decision-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+}
+
+.decision-metrics .metric-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.quant-card .muted,
+.action-card .muted {
+  display: block;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .risk-row,
 .quality-item {
   display: flex;
@@ -272,7 +289,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .candidate-metrics {
+  .candidate-metrics,
+  .decision-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -606,7 +624,8 @@ body {
     padding: 12px;
   }
 
-  .candidate-metrics {
+  .candidate-metrics,
+  .decision-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -628,6 +647,11 @@ body {
 
   .mobile-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-value {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .mobile-card-section {

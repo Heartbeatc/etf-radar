@@ -11,7 +11,7 @@ from app.adapters.store import Store
 from app.core.config import get_settings
 from app.domain.models import EtfSnapshot
 from app.services.alerts import AlertManager
-from app.services.pipeline import TOPIC_SUFFIXES, build_rule_plan_for_code, model_payload
+from app.services.pipeline import TOPIC_SUFFIXES, build_rule_plan_for_code, model_payload, trade_codes
 
 LOGGER = logging.getLogger("etf.signal_worker")
 
@@ -60,7 +60,7 @@ class SignalWorker:
             LOGGER.exception("invalid snapshot payload")
             return
         self.store.save_latest_snapshots([snapshot])
-        if snapshot.code not in self.settings.exposed_codes:
+        if snapshot.code not in trade_codes(self.settings, self.store):
             return
         previous = self.store.previous_signals([snapshot.code])
         plan = build_rule_plan_for_code(self.settings, self.store, snapshot.code)

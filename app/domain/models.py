@@ -283,6 +283,10 @@ class ActionDecisionItem(BaseModel):
     signal: str
     current_price: float | None = None
     entry_price: float | None = None
+    position_shares: float | None = None
+    floating_profit_pct: float | None = None
+    suggested_position_pct: int | None = None
+    execution_note: str = ""
     buy_zone_low: float | None = None
     buy_zone_high: float | None = None
     avoid_above: float | None = None
@@ -513,6 +517,9 @@ class QuantEtfDecision(BaseModel):
     score: int
     direction_label: str | None = None
     price: float | None = None
+    has_position: bool = False
+    floating_profit_pct: float | None = None
+    suggested_position_pct: int | None = None
     buy_zone_low: float | None = None
     buy_zone_high: float | None = None
     avoid_above: float | None = None

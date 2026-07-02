@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Iterable
 
 from app.core.config import Settings
 from app.domain.models import DataQualityItem, DataQualityReport, EtfSnapshot, SourceStatus
 from app.services.pipeline import source_status_for
 
 
-def build_data_quality_report(settings: Settings, snapshots: dict[str, EtfSnapshot]) -> DataQualityReport:
-    statuses = {item.code: item for item in source_status_for(settings, snapshots)}
+def build_data_quality_report(
+    settings: Settings,
+    snapshots: dict[str, EtfSnapshot],
+    codes: Iterable[str] | None = None,
+    roles: dict[str, str] | None = None,
+) -> DataQualityReport:
+    codes_to_check = list(codes) if codes is not None else settings.all_poll_codes
+    statuses = {item.code: item for item in source_status_for(settings, snapshots, codes=codes_to_check, roles=roles)}
     items: list[DataQualityItem] = []
-    for code in settings.all_poll_codes:
+    for code in codes_to_check:
         snapshot = snapshots.get(code)
         status = statuses.get(code)
         if status is None:
@@ -70,7 +77,7 @@ def _score(snapshot: EtfSnapshot | None, status: SourceStatus, settings: Setting
         score -= 10
     if snapshot.price is None or snapshot.price <= 0:
         score -= 40
-    if status.role in {"main", "backup"} and (snapshot.iopv is None or snapshot.iopv <= 0):
+    if status.role in {"main", "backup", "position"} and (snapshot.iopv is None or snapshot.iopv <= 0):
         score -= 20
     if snapshot.premium_pct is not None and abs(snapshot.premium_pct) > 3:
         score -= 20

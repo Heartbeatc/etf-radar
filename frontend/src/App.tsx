@@ -471,7 +471,7 @@ function QuantDecisionTab({ decision }: { decision?: QuantDecisionResponse }) {
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <section className="panel">
-            <SectionHeader icon={<BarChartOutlined />} title="固定池当下动作" meta={`${decision.fixed_pool_actions.length} 个`} />
+            <SectionHeader icon={<BarChartOutlined />} title="持仓/固定池动作" meta={`${decision.fixed_pool_actions.length} 个`} />
             <QuantEtfCards items={decision.fixed_pool_actions} compact />
           </section>
         </Col>
@@ -504,9 +504,11 @@ function QuantEtfCards({ items, compact = false }: { items: QuantEtfDecision[]; 
               <div className="candidate-name">{item.name}</div>
               <Text className="muted">{item.code} · {item.operation}</Text>
             </div>
-            <div className="candidate-metrics">
+            <div className="candidate-metrics decision-metrics">
               <MetricLabel label="分数" value={<ScoreText value={item.score} />} />
               <MetricLabel label="现价" value={formatPrice(item.price)} />
+              <MetricLabel label="动作仓位" value={formatPositionPct(item.suggested_position_pct)} />
+              <MetricLabel label="浮盈" value={<PercentValue value={item.floating_profit_pct} />} />
               <MetricLabel label="低吸" value={`${formatPrice(item.buy_zone_low)} - ${formatPrice(item.buy_zone_high)}`} />
               <MetricLabel label="防守" value={formatPrice(item.exit_price)} />
             </div>
@@ -802,7 +804,7 @@ function ActionDecisionTab({ decisions }: { decisions?: ActionDecisionResponse }
     <Space direction="vertical" size="large" className="wide-stack">
       <ActionDecisionSummary decisions={decisions} />
       <section className="panel">
-        <SectionHeader icon={<SafetyCertificateOutlined />} title="固定池动作明细" meta={decisions ? `${actionPortfolioStatusLabel(decisions.status)} · ${formatDateTime(decisions.generated_at)}` : '-'} />
+        <SectionHeader icon={<SafetyCertificateOutlined />} title="持仓/固定池动作明细" meta={decisions ? `${actionPortfolioStatusLabel(decisions.status)} · ${formatDateTime(decisions.generated_at)}` : '-'} />
         {decisions ? <ActionDecisionTable data={decisions.items} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />}
       </section>
       {decisions?.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} />)}
@@ -831,12 +833,15 @@ function ActionDecisionSummary({ decisions }: { decisions?: ActionDecisionRespon
                   <Text className="muted">{item.code} · {roleLabel(item.role)}</Text>
                 </div>
                 <Progress percent={clamp(item.action_score)} size="small" strokeColor={actionColor(item.side)} />
-                <div className="candidate-metrics">
+                <div className="candidate-metrics decision-metrics">
                   <MetricLabel label="现价" value={formatPrice(item.current_price)} />
+                  <MetricLabel label={item.has_position ? '浮盈' : '首仓'} value={item.has_position ? <PercentValue value={item.floating_profit_pct} /> : formatPositionPct(item.suggested_position_pct)} />
                   <MetricLabel label="买区" value={`${formatPrice(item.buy_zone_low)} - ${formatPrice(item.buy_zone_high)}`} />
                   <MetricLabel label="止盈一" value={formatPrice(item.first_take_profit_price)} />
                   <MetricLabel label="防守" value={formatPrice(item.effective_exit_price)} />
+                  <MetricLabel label="动作仓位" value={formatPositionPct(item.suggested_position_pct)} />
                 </div>
+                <Text className="metric-foot">{item.execution_note}</Text>
               </Space>
             </article>
           ))}
@@ -845,12 +850,17 @@ function ActionDecisionSummary({ decisions }: { decisions?: ActionDecisionRespon
       ) : (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />
       )}
-      {decisions && <Text className="metric-foot">可执行动作 {immediate.length}/{items.length}；动态ETF载体未进入固定池前不生成买卖动作。</Text>}
+      {decisions && <Text className="metric-foot">可执行动作 {immediate.length}/{items.length}；动态候选未入池且未登记持仓前只给开仓候选，不给完整买卖点。</Text>}
     </section>
   );
 }
 
 function ActionDecisionTable({ data }: { data: ActionDecisionItem[] }) {
+  const isMobile = useIsMobileLayout();
+  if (isMobile) {
+    return <ActionDecisionCards data={data} />;
+  }
+
   const columns: ColumnsType<ActionDecisionItem> = [
     { title: '动作', key: 'action', fixed: 'left', width: 140, render: (_, record) => <ActionTag action={record.action} side={record.side} /> },
     {
@@ -868,6 +878,9 @@ function ActionDecisionTable({ data }: { data: ActionDecisionItem[] }) {
     { title: '动作分', dataIndex: 'action_score', key: 'action_score', width: 110, render: (value: number) => <ScoreCell value={value} /> },
     { title: '置信', dataIndex: 'confidence', key: 'confidence', width: 90 },
     { title: '现价', dataIndex: 'current_price', key: 'current_price', width: 90, render: formatPrice },
+    { title: '成本', dataIndex: 'entry_price', key: 'entry_price', width: 90, render: formatPrice },
+    { title: '浮盈', dataIndex: 'floating_profit_pct', key: 'floating_profit_pct', width: 90, render: (value: number | null) => <PercentValue value={value} /> },
+    { title: '动作仓位', dataIndex: 'suggested_position_pct', key: 'suggested_position_pct', width: 100, render: formatPositionPct },
     { title: '低吸区间', key: 'buy_zone', width: 150, render: (_, record) => `${formatPrice(record.buy_zone_low)} - ${formatPrice(record.buy_zone_high)}` },
     { title: '回避价', dataIndex: 'avoid_above', key: 'avoid_above', width: 90, render: formatPrice },
     { title: '止盈一', dataIndex: 'first_take_profit_price', key: 'first_take_profit_price', width: 90, render: formatPrice },
@@ -877,10 +890,45 @@ function ActionDecisionTable({ data }: { data: ActionDecisionItem[] }) {
     { title: '持有分', dataIndex: 'hold_score', key: 'hold_score', width: 90, render: (value: number) => <ScoreText value={value} /> },
     { title: '止盈分', dataIndex: 'take_profit_score', key: 'take_profit_score', width: 90, render: (value: number) => <ScoreText value={value} /> },
     { title: '风险分', dataIndex: 'risk_score', key: 'risk_score', width: 90, render: (value: number) => <Text strong style={{ color: riskScoreColor(value) }}>{value}</Text> },
+    { title: '执行说明', dataIndex: 'execution_note', key: 'execution_note', width: 240 },
     { title: '理由', dataIndex: 'reasons', key: 'reasons', width: 260, render: (items: string[]) => <PoolReasonTags items={items} /> },
     { title: '风险', dataIndex: 'risk_flags', key: 'risk_flags', width: 260, render: (items: string[]) => <PoolReasonTags items={items} color="orange" /> }
   ];
-  return <Table rowKey="code" columns={columns} dataSource={data} size="middle" pagination={false} scroll={{ x: 1900 }} />;
+  return <Table rowKey="code" columns={columns} dataSource={data} size="middle" pagination={false} scroll={{ x: 2300 }} />;
+}
+
+function ActionDecisionCards({ data }: { data: ActionDecisionItem[] }) {
+  if (!data.length) {
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无动作决策" />;
+  }
+
+  return (
+    <div className="mobile-card-list">
+      {data.map((record) => (
+        <article className="mobile-data-card" key={record.code}>
+          <div className="mobile-card-head">
+            <div className="mobile-card-title-block">
+              <Text strong className="mobile-card-title">{record.name}</Text>
+              <Text className="mobile-card-subtitle">{record.code} · {record.has_position ? '有持仓' : '无持仓'} · {roleLabel(record.role)}</Text>
+            </div>
+            <ActionTag action={record.action} side={record.side} />
+          </div>
+          <div className="mobile-metric-grid">
+            <MobileMetric label="动作分" value={<ScoreText value={record.action_score} />} />
+            <MobileMetric label="现价" value={formatPrice(record.current_price)} />
+            <MobileMetric label="成本" value={formatPrice(record.entry_price)} />
+            <MobileMetric label="浮盈" value={<PercentValue value={record.floating_profit_pct} />} />
+            <MobileMetric label="动作仓位" value={formatPositionPct(record.suggested_position_pct)} />
+            <MobileMetric label="风险" value={<Text strong style={{ color: riskScoreColor(record.risk_score) }}>{record.risk_score.toFixed(0)}</Text>} />
+          </div>
+          <MobileCardSection label="买区">{formatPrice(record.buy_zone_low)} - {formatPrice(record.buy_zone_high)} · 回避 {formatPrice(record.avoid_above)}</MobileCardSection>
+          <MobileCardSection label="止盈/防守">止盈 {formatPrice(record.first_take_profit_price)} / {formatPrice(record.second_take_profit_price)} · 防守 {formatPrice(record.effective_exit_price)}</MobileCardSection>
+          <MobileCardSection label="执行">{record.execution_note}</MobileCardSection>
+          <MobileCardSection label="风险"><WarningTags warnings={record.risk_flags} /></MobileCardSection>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function ActionTag({ action, side }: { action: string; side: string }) {
@@ -2166,6 +2214,13 @@ function formatPct(value: number): string {
   return `${prefix}${value.toFixed(2)}%`;
 }
 
+function formatPositionPct(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return '-';
+  }
+  return `${value}%`;
+}
+
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -2194,7 +2249,8 @@ function roleLabel(value: string): string {
     main: '主要',
     backup: '备选',
     watch: '观察',
-    benchmark: '基准'
+    benchmark: '基准',
+    position: '持仓'
   };
   return map[value] ?? value;
 }

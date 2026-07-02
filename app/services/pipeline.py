@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
 from app.core.config import Settings
 from app.domain.models import EtfSnapshot, SourceStatus, TradePlan
@@ -10,20 +10,40 @@ from app.services.scoring import AnalysisInputs, build_plan
 TOPIC_SUFFIXES = ["market.normalized.snapshot", "signal.generated", "source.status"]
 
 
-def roles_for(settings: Settings) -> dict[str, str]:
+def roles_for(settings: Settings, position_codes: Iterable[str] | None = None) -> dict[str, str]:
     roles = {code: "main" for code in settings.main_codes}
     roles.update({code: "backup" for code in settings.backup_codes})
     roles.update({code: "benchmark" for code in settings.benchmark_code_list})
+    for code in position_codes or []:
+        roles.setdefault(code, "position")
     return roles
 
 
-def source_status_for(settings: Settings, latest: dict[str, EtfSnapshot]) -> list[SourceStatus]:
-    roles = roles_for(settings)
+def monitor_codes(settings: Settings, store) -> list[str]:
+    return _dedupe([*settings.all_poll_codes, *position_codes(store)])
+
+
+def trade_codes(settings: Settings, store) -> list[str]:
+    return _dedupe([*settings.exposed_codes, *position_codes(store)])
+
+
+def position_codes(store) -> list[str]:
+    return list(store.positions().keys())
+
+
+def source_status_for(
+    settings: Settings,
+    latest: dict[str, EtfSnapshot],
+    codes: Iterable[str] | None = None,
+    roles: dict[str, str] | None = None,
+) -> list[SourceStatus]:
+    codes_to_check = list(codes) if codes is not None else settings.all_poll_codes
+    role_map = roles or roles_for(settings)
     now = datetime.now(timezone.utc)
     statuses: list[SourceStatus] = []
-    for code in settings.all_poll_codes:
+    for code in codes_to_check:
         item = latest.get(code)
-        role = roles.get(code, "benchmark")
+        role = role_map.get(code, "watch")
         if not item:
             statuses.append(SourceStatus(code=code, role=role, ok=False, issues=["missing latest snapshot"]))
             continue
@@ -33,7 +53,7 @@ def source_status_for(settings: Settings, latest: dict[str, EtfSnapshot]) -> lis
             issues.append(f"stale snapshot over {settings.source_soft_stale_seconds}s")
         if item.price is None or item.price <= 0:
             issues.append("invalid price")
-        if role in {"main", "backup"}:
+        if role in {"main", "backup", "position"}:
             if item.iopv is None or item.iopv <= 0:
                 issues.append("missing ETF IOPV")
             if item.premium_pct is not None and abs(item.premium_pct) > 3:
@@ -59,7 +79,7 @@ def source_status_for(settings: Settings, latest: dict[str, EtfSnapshot]) -> lis
 
 def build_rule_plans(settings: Settings, store) -> list[TradePlan]:
     plans: list[TradePlan] = []
-    for code in settings.exposed_codes:
+    for code in trade_codes(settings, store):
         plan = build_rule_plan_for_code(settings, store, code)
         if plan is not None:
             plans.append(plan)
@@ -67,7 +87,7 @@ def build_rule_plans(settings: Settings, store) -> list[TradePlan]:
 
 
 def build_rule_plan_for_code(settings: Settings, store, code: str) -> TradePlan | None:
-    if code not in settings.exposed_codes:
+    if code not in trade_codes(settings, store):
         return None
     latest = store.latest_snapshots()
     snapshot = latest.get(code)
@@ -83,6 +103,17 @@ def build_rule_plan_for_code(settings: Settings, store, code: str) -> TradePlan 
             stale_seconds=settings.data_stale_seconds,
         )
     )
+
+
+def _dedupe(codes: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for code in codes:
+        if not code or code in seen:
+            continue
+        result.append(code)
+        seen.add(code)
+    return result
 
 
 def model_payload(value: Any) -> dict[str, Any]:

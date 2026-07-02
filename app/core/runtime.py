@@ -21,7 +21,7 @@ from app.services.ai_summary import build_ai_context, due_summary_kinds, make_su
 from app.services.alerts import AlertManager
 from app.services.discovery import build_discovery_report
 from app.services.market_flow import build_market_flow_report
-from app.services.pipeline import TOPIC_SUFFIXES, build_rule_plans, model_payload, roles_for, source_status_for
+from app.services.pipeline import TOPIC_SUFFIXES, build_rule_plans, model_payload, monitor_codes, roles_for, source_status_for, trade_codes
 from app.services.scoring import AnalysisInputs, build_plan
 
 
@@ -121,9 +121,10 @@ class Runtime:
             await asyncio.sleep(self.settings.poll_interval_seconds)
 
     async def poll_once(self, refresh_history: bool = False) -> None:
+        codes = self.monitor_codes()
         roles = self.roles()
-        previous_signals = self.store.previous_signals(self.settings.exposed_codes)
-        snapshots = await self.client.fetch_spot(self.settings.all_poll_codes, roles)
+        previous_signals = self.store.previous_signals(self.trade_codes())
+        snapshots = await self.client.fetch_spot(codes, roles)
         self.store.save_snapshots(snapshots)
         await self._publish_snapshots(snapshots)
         await self._write_snapshots(snapshots)
@@ -135,7 +136,7 @@ class Runtime:
 
         history_errors: list[str] = []
         if refresh_history:
-            for code in self.settings.all_poll_codes:
+            for code in codes:
                 try:
                     daily, minute = await asyncio.gather(self.client.fetch_daily(code), self.client.fetch_minute(code))
                 except Exception as exc:
@@ -194,7 +195,7 @@ class Runtime:
         benchmarks = [snapshots[code] for code in self.settings.benchmark_code_list if code in snapshots]
         ages = [(datetime.now(timezone.utc) - item.fetched_at).total_seconds() for item in snapshots.values()]
         fixed_snapshots = [snapshots.get(plan.code) for plan in plans]
-        fixed_times = [item.source_time or item.fetched_at for item in fixed_snapshots if item and (item.source_time or item.fetched_at)]
+        fixed_times = [item.source_time for item in fixed_snapshots if item and item.source_time]
         return LatestResponse(
             generated_at=datetime.now(timezone.utc),
             data_time=max(fixed_times) if fixed_times else None,
@@ -213,6 +214,12 @@ class Runtime:
 
     def build_rule_plans(self) -> list[TradePlan]:
         return build_rule_plans(self.settings, self.store)
+
+    def monitor_codes(self) -> list[str]:
+        return monitor_codes(self.settings, self.store)
+
+    def trade_codes(self) -> list[str]:
+        return trade_codes(self.settings, self.store)
 
     def detail(self, code: str, entry_price: float | None = None) -> TradePlan:
         latest = self.store.latest_snapshots()
@@ -334,7 +341,7 @@ class Runtime:
             return self.store.save_ai_summary(item)
 
     def source_status(self) -> list[SourceStatus]:
-        return source_status_for(self.settings, self.store.latest_snapshots())
+        return source_status_for(self.settings, self.store.latest_snapshots(), codes=self.monitor_codes(), roles=self.roles())
 
     async def integrations_status(self) -> list[IntegrationStatus]:
         kafka_ok, kafka_detail = self.event_bus.health()
@@ -395,7 +402,7 @@ class Runtime:
     async def refresh_history(self) -> dict:
         errors: list[str] = []
         updated: list[str] = []
-        for code in self.settings.all_poll_codes:
+        for code in self.monitor_codes():
             try:
                 daily, minute = await asyncio.gather(self.client.fetch_daily(code), self.client.fetch_minute(code))
                 self.store.save_daily_bars(code, daily)
@@ -406,7 +413,7 @@ class Runtime:
         return {"updated": updated, "errors": errors}
 
     def roles(self) -> dict[str, str]:
-        return roles_for(self.settings)
+        return roles_for(self.settings, self.store.positions().keys())
 
     async def _publish_snapshots(self, snapshots) -> None:
         try:

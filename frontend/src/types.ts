@@ -6,6 +6,7 @@ export interface HealthResponse {
   last_warning: string | null;
   tracked: string[];
   benchmarks: string[];
+  monitored?: string[];
   snapshot_count: number;
   source_bad_count: number;
   source_bad_codes: string[];
@@ -286,6 +287,9 @@ export interface QuantEtfDecision {
   score: number;
   direction_label: string | null;
   price: number | null;
+  has_position: boolean;
+  floating_profit_pct: number | null;
+  suggested_position_pct: number | null;
   buy_zone_low: number | null;
   buy_zone_high: number | null;
   avoid_above: number | null;
@@ -355,6 +359,10 @@ export interface ActionDecisionItem {
   signal: string;
   current_price: number | null;
   entry_price: number | null;
+  position_shares: number | null;
+  floating_profit_pct: number | null;
+  suggested_position_pct: number | null;
+  execution_note: string;
   buy_zone_low: number | null;
   buy_zone_high: number | null;
   avoid_above: number | null;

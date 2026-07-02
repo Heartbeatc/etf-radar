@@ -42,7 +42,8 @@ def build_quant_decision_report(
         warnings=_dedupe(warnings)[:8],
         assumptions=[
             "第一屏只给最终量化结论，其余页面作为证据。",
-            "ETF买卖动作只对固定池标的生效；动态候选ETF先作为纳入固定池建议。",
+            "ETF完整买卖动作覆盖固定池和用户已登记持仓。",
+            "动态候选ETF只给空仓开仓候选，必须入池或登记持仓后才有完整低吸/止盈/防守线。",
             "个股目前用于验证方向强弱，不直接输出个股买卖点。",
             "主升确认需要资金驻留、承接和扩散同时满足；单日热点不等于主升。",
         ],
@@ -116,11 +117,13 @@ def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResp
 
 
 def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
-    operation = "建议纳入固定池观察，暂不直接买入。"
+    suggested_position_pct = None
+    operation = "空仓候选：先加入固定池监控，拿到低吸区和防守线后再决定。"
     if item.direction_state == "confirmed_mainline" and item.low_buy_readiness_score and item.low_buy_readiness_score >= 65:
-        operation = "可作为固定池纳入候选，纳入后再等低吸动作。"
+        suggested_position_pct = 20
+        operation = "空仓开仓候选；入池后等待低吸触发，首仓上限20%，未触发不买。"
     elif item.direction_state == "candidate":
-        operation = "主线候选载体，先等回踩和次日承接。"
+        operation = "主线候选载体，先等回踩和次日承接；未确认前不追。"
     return QuantEtfDecision(
         code=item.code,
         name=item.name,
@@ -130,8 +133,9 @@ def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
         score=item.score,
         direction_label=item.direction_label,
         price=item.price,
+        suggested_position_pct=suggested_position_pct,
         reasons=item.reasons[:6],
-        risk_flags=item.risk_flags[:6] + ["未进入固定池，暂无完整买卖点"],
+        risk_flags=item.risk_flags[:6] + ["未进入固定池或持仓监控，暂无完整买卖点"],
     )
 
 
@@ -145,6 +149,9 @@ def _fixed_action_decision(item: ActionDecisionItem, direction_label: str | None
         score=pool_score if pool_score is not None else item.action_score,
         direction_label=direction_label,
         price=item.current_price,
+        has_position=item.has_position,
+        floating_profit_pct=item.floating_profit_pct,
+        suggested_position_pct=item.suggested_position_pct,
         buy_zone_low=item.buy_zone_low,
         buy_zone_high=item.buy_zone_high,
         avoid_above=item.avoid_above,
@@ -201,10 +208,16 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
 def _conclusion(direction: QuantDirectionDecision, etfs: list[QuantEtfDecision], fixed_actions: list[QuantEtfDecision]) -> str:
     buy = [item for item in fixed_actions if item.action == "BUY_FIRST_BATCH"]
     sell = [item for item in fixed_actions if item.action.startswith("SELL") or item.action == "REDUCE_OR_HOLD_TIGHT"]
+    holding = [item for item in fixed_actions if item.has_position]
+    candidate_open = [item for item in etfs if item.suggested_position_pct]
     if sell:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前优先处理卖出/减仓信号。"
+    if holding:
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓按持有/止盈/防守线跟踪。"
     if buy:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；固定池出现可执行低吸。"
+    if candidate_open:
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；空仓只等候选ETF入池后的低吸触发。"
     return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前不追高，以等待和验证为主。"
 
 

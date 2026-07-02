@@ -59,7 +59,7 @@ def build_ai_context(
     snapshots: dict,
 ) -> tuple[dict, datetime | None]:
     fixed_snapshots = [snapshots.get(plan.code) for plan in plans]
-    data_times = [item.source_time or item.fetched_at for item in fixed_snapshots if item and (item.source_time or item.fetched_at)]
+    data_times = [item.source_time for item in fixed_snapshots if item and item.source_time]
     source_data_time = max(data_times) if data_times else None
     risk = build_risk_report(plans)
     data_quality = build_data_quality_report(settings, snapshots)

@@ -10,7 +10,7 @@ from app.adapters.market_data import MarketDataClient
 from app.adapters.event_bus import KafkaEventBus
 from app.adapters.store import Store
 from app.core.config import get_settings
-from app.services.pipeline import TOPIC_SUFFIXES, model_payload, roles_for, source_status_for
+from app.services.pipeline import TOPIC_SUFFIXES, model_payload, monitor_codes, roles_for, source_status_for
 
 LOGGER = logging.getLogger("etf.collector")
 
@@ -52,19 +52,20 @@ class CollectorWorker:
         await self.client.close()
 
     async def poll_once(self, refresh_history: bool = False) -> tuple[int, int]:
-        roles = roles_for(self.settings)
-        snapshots = await self.client.fetch_spot(self.settings.all_poll_codes, roles)
+        codes = monitor_codes(self.settings, self.store)
+        roles = roles_for(self.settings, self.store.positions().keys())
+        snapshots = await self.client.fetch_spot(codes, roles)
         self.store.save_snapshots(snapshots)
         self.event_bus.publish_many("market.normalized.snapshot", [model_payload(item) for item in snapshots])
         await self.clickhouse.insert_snapshots(snapshots)
 
-        statuses = source_status_for(self.settings, self.store.latest_snapshots())
+        statuses = source_status_for(self.settings, self.store.latest_snapshots(), codes=codes, roles=roles)
         self.store.save_source_status(statuses)
         self.event_bus.publish_many("source.status", [model_payload(item) for item in statuses])
         await self.clickhouse.insert_source_status(statuses)
 
         if refresh_history:
-            for code in self.settings.all_poll_codes:
+            for code in codes:
                 try:
                     daily, minute = await asyncio.gather(self.client.fetch_daily(code), self.client.fetch_minute(code))
                 except Exception as exc:

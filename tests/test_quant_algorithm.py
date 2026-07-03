@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from app.core.config import Settings
 from app.core.runtime import Runtime, _review_side_for_fixed_action
 from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
+from app.services.ai_summary import CN_TZ, due_summary_kinds, summary_title
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.quant_decision import _etf_decisions, build_quant_decision_report
@@ -328,3 +329,22 @@ def test_ai_trade_review_uses_cache_for_same_opportunity():
             assert second.stocks[0].execution.ai_risk_review is not None
 
     asyncio.run(run_check())
+
+
+def test_direction_ai_summary_windows_are_three_daily_slots():
+    opening = datetime(2026, 7, 3, 9, 30, tzinfo=CN_TZ)
+    midday = datetime(2026, 7, 3, 11, 45, tzinfo=CN_TZ)
+    evening = datetime(2026, 7, 3, 20, 0, tzinfo=CN_TZ)
+
+    assert due_summary_kinds(opening) == ["opening_auction"]
+    assert due_summary_kinds(midday) == ["midday"]
+    assert due_summary_kinds(evening) == ["closing"]
+    assert summary_title("opening_auction") == "早盘方向探索"
+    assert summary_title("midday") == "午盘方向复盘"
+    assert summary_title("closing") == "晚盘方向复盘"
+
+
+def test_quant_decision_response_exposes_direction_ai_summaries_field():
+    report = build_quant_decision_report(flow_report([direction("candidate", [], probability=66, low_buy=58)]))
+
+    assert report.ai_direction_summaries == []

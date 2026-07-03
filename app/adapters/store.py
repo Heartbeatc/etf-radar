@@ -846,9 +846,9 @@ def _ai_summary_item(row: sqlite3.Row) -> AiSummaryItem:
 
 def _ai_summary_title(kind: str) -> str:
     return {
-        "opening_auction": "早盘竞价/开盘情绪",
-        "midday": "午间复盘",
-        "closing": "尾盘/收盘总结",
+        "opening_auction": "早盘方向探索",
+        "midday": "午盘方向复盘",
+        "closing": "晚盘方向复盘",
     }.get(kind, kind)
 
 

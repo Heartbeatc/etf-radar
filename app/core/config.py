@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     event_corpus_request_timeout_seconds: float = Field(default=8.0, ge=2.0, le=30.0)
 
     ai_enabled: bool = False
-    ai_summary_daily_call_limit: int = Field(default=4, ge=0, le=20)
+    ai_summary_daily_call_limit: int = Field(default=3, ge=0, le=20)
     ai_summary_force_cooldown_seconds: int = Field(default=1800, ge=300, le=14_400)
     ai_summary_check_interval_seconds: int = Field(default=60, ge=30, le=600)
     ai_trade_review_daily_call_limit: int = Field(default=3, ge=0, le=20)

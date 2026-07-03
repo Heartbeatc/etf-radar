@@ -12,14 +12,14 @@ from app.services.risk import build_risk_report
 CN_TZ = ZoneInfo("Asia/Shanghai")
 SUMMARY_KINDS = ("opening_auction", "midday", "closing")
 SUMMARY_WINDOWS: dict[str, tuple[time, time]] = {
-    "opening_auction": (time(9, 25), time(9, 45)),
-    "midday": (time(11, 30), time(12, 45)),
-    "closing": (time(14, 50), time(15, 20)),
+    "opening_auction": (time(9, 25), time(10, 10)),
+    "midday": (time(11, 30), time(13, 5)),
+    "closing": (time(15, 5), time(23, 0)),
 }
 SUMMARY_TITLES = {
-    "opening_auction": "早盘竞价/开盘情绪",
-    "midday": "午间复盘",
-    "closing": "尾盘/收盘总结",
+    "opening_auction": "早盘方向探索",
+    "midday": "午盘方向复盘",
+    "closing": "晚盘方向复盘",
 }
 
 
@@ -57,6 +57,7 @@ def build_ai_context(
     plans: list[TradePlan],
     market_flow: MarketFlowResponse | None,
     snapshots: dict,
+    kind: str | None = None,
 ) -> tuple[dict, datetime | None]:
     fixed_snapshots = [snapshots.get(plan.code) for plan in plans]
     data_times = [item.source_time for item in fixed_snapshots if item and item.source_time]
@@ -66,8 +67,9 @@ def build_ai_context(
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_data_time": source_data_time.isoformat() if source_data_time else None,
+        "summary_kind_title": summary_title(kind or _current_summary_kind()),
         "tracked_etfs": settings.exposed_codes,
-        "market_directions": [_direction_payload(item) for item in (market_flow.directions[:5] if market_flow else [])],
+        "market_directions": [_direction_payload(item) for item in (market_flow.directions[:8] if market_flow else [])],
         "market_warnings": market_flow.warnings if market_flow else [],
         "fixed_pool": [_plan_payload(plan) for plan in plans],
         "risk_state": {
@@ -81,11 +83,11 @@ def build_ai_context(
             "warnings": data_quality.warnings,
         },
         "summary_focus": [
-            "情绪强弱和是否一致",
-            "主线/候选方向是否有资金留存",
-            "量化候选ETF是否只适合等待、低吸、持有、止盈或回避",
-            "溢价、破位、放量滞涨、数据质量风险",
-            "下一时段只观察哪些条件，不给绝对买卖命令",
+            "最近7日强方向和今日资金是否一致",
+            "主线、候选、单日脉冲、退潮方向要分开",
+            "龙头/二龙头是否还能验证方向承接",
+            "下一时段资金可能继续流向哪里，以及需要哪些反证",
+            "只给方向探索和观察建议，不给绝对买卖命令",
         ],
     }, source_data_time
 
@@ -125,6 +127,10 @@ def _direction_payload(item) -> dict:
         "avg_change_pct": item.avg_change_pct,
         "breadth_pct": item.breadth_pct,
         "main_net_inflow": item.main_net_inflow,
+        "residency_score": item.residency_score,
+        "retention_score": item.retention_score,
+        "low_buy_readiness_score": item.low_buy_readiness_score,
+        "factor_scores": item.factor_scores,
         "risk_flags": item.risk_flags[:5],
         "main_etfs": [f"{etf.code} {etf.name}" for etf in item.main_etfs[:2]],
         "linked_stocks": [f"{stock.code} {stock.name}" for stock in item.linked_stocks[:3]],
@@ -148,3 +154,8 @@ def _plan_payload(plan: TradePlan) -> dict:
         "exit_plan": plan.exit_plan,
         "warnings": plan.warnings,
     }
+
+
+def _current_summary_kind(now: datetime | None = None) -> str:
+    due = due_summary_kinds(now)
+    return due[0] if due else "closing"

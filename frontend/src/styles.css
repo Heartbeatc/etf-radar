@@ -133,6 +133,11 @@ input {
   color: #666;
 }
 
+.ai-direction-summary {
+  color: #111 !important;
+  font-weight: 600;
+}
+
 .excel-sheet td strong {
   display: block;
   margin-bottom: 2px;

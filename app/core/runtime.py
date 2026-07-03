@@ -407,7 +407,7 @@ class Runtime:
             market_flow = await self.market_flow(force=False)
         except Exception:
             market_flow = None
-        context, source_data_time = build_ai_context(self.settings, plans, market_flow, snapshots)
+        context, source_data_time = build_ai_context(self.settings, plans, market_flow, snapshots, kind=kind)
         try:
             summary_text = await self.ai.summarize_market(kind, context)
             item = make_summary_item(

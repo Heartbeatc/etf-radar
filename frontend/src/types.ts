@@ -377,6 +377,7 @@ export interface QuantDecisionResponse {
   stocks: QuantStockDecision[];
   fixed_pool_actions: QuantEtfDecision[];
   ai_risk_reviews: AiTradeRiskReview[];
+  ai_direction_summaries: AiSummaryItem[];
   warnings: string[];
   assumptions: string[];
 }

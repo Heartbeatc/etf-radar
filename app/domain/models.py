@@ -659,6 +659,7 @@ class QuantDecisionResponse(BaseModel):
     stocks: list[QuantStockDecision]
     fixed_pool_actions: list[QuantEtfDecision]
     ai_risk_reviews: list[AiTradeRiskReview] = Field(default_factory=list)
+    ai_direction_summaries: list[AiSummaryItem] = Field(default_factory=list)
     warnings: list[str]
     assumptions: list[str]
 

@@ -64,9 +64,10 @@ class AIAnalyst:
                 {
                     "role": "system",
                     "content": (
-                        "你是A股场内ETF交易辅助系统的风控型分析员。"
-                        "只基于输入数据做盘面总结，不承诺收益，不给绝对买卖命令。"
-                        "输出中文，结构清晰，控制在220字以内。必须包含：市场情绪、主线/候选方向、量化候选ETF动作倾向、风险、下一步观察。"
+                        "你是A股量化系统的方向研究员。"
+                        "只基于输入数据做方向探索，不承诺收益，不给绝对买卖命令。"
+                        "输出中文，控制在260字以内。必须包含：最强方向、主力是否仍在、当前阶段、下一时段可能流向、反证/风险、操作建议只允许写观察/等待/小仓验证/防守。"
+                        "必须区分确认主线、候选方向、单日脉冲和退潮方向；不要把成交额大直接等同主线。"
                     ),
                 },
                 {
@@ -334,20 +335,20 @@ def _bucket(score: int) -> int:
 
 def _fallback_market_summary(kind: str, context: dict) -> str:
     titles = {
-        "opening_auction": "早盘竞价/开盘情绪",
-        "midday": "午间复盘",
-        "closing": "尾盘/收盘总结",
+        "opening_auction": "早盘方向探索",
+        "midday": "午盘方向复盘",
+        "closing": "晚盘方向复盘",
     }
     directions = context.get("market_directions") or []
     plans = context.get("fixed_pool") or []
     top = directions[0] if directions else {}
     strongest = top.get("direction_label") or "暂无明确方向"
     top_state = top.get("state") or "观察"
-    plan_text = "；".join(
-        f"{item.get('code')} {item.get('signal')} 低吸{item.get('low_buy_score')} 风险{item.get('risk_score')}"
-        for item in plans[:3]
-    ) or "量化候选暂无有效信号"
-    return f"{titles.get(kind, kind)}：市场最强方向为{strongest}，状态{top_state}。量化候选：{plan_text}。仅按规则观察低吸、止盈和防守线，不追高。"
+    direction_text = "；".join(
+        f"{item.get('direction_label')} 状态{item.get('state')} 主线{item.get('mainline_probability')} 驻留{item.get('residency_score')} 承接{item.get('retention_score')}"
+        for item in directions[:3]
+    ) or "暂无明确方向"
+    return f"{titles.get(kind, kind)}：最强方向为{strongest}，状态{top_state}。方向队列：{direction_text}。建议只观察资金驻留、龙头/二龙承接和退潮反证，不追单日脉冲。"
 
 
 def _fallback_summary(plan: TradePlan) -> str:

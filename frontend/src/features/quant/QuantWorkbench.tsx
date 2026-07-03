@@ -53,7 +53,10 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td className="sheet-meta">{formatDateTime(decision?.generated_at)}</td>
             <td className="sheet-meta">30 秒刷新</td>
             <td className="sheet-meta">{decision?.market_status ?? '-'}</td>
-            <td className="sheet-meta" colSpan={5}>{decision?.conclusion ?? '等待数据'}</td>
+            <td className="sheet-meta" colSpan={5}>
+              <span>{decision?.conclusion ?? '等待数据'}</span>
+              {formatAiDirectionSummary(decision)}
+            </td>
             <td className="sheet-actions">
               <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? '刷新中' : '刷新'}</button>
               <button type="button" onClick={onLogout}>退出</button>
@@ -97,6 +100,12 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
       </table>
     </main>
   );
+}
+
+function formatAiDirectionSummary(decision?: QuantDecisionResponse) {
+  const summary = decision?.ai_direction_summaries?.[0];
+  if (!summary) return null;
+  return <span className="ai-direction-summary">AI {summary.title}：{summary.summary}</span>;
 }
 
 function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {

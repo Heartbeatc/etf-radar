@@ -542,6 +542,14 @@ class Store:
         return str(row["value"]).strip().lower() in {"1", "true", "yes", "on"}
 
     def set_bool_setting(self, key: str, value: bool) -> None:
+        self.set_text_setting(key, "true" if value else "false")
+
+    def get_text_setting(self, key: str, default: str = "") -> str:
+        with self._connect() as conn:
+            row = conn.execute("select value from runtime_settings where key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+    def set_text_setting(self, key: str, value: str) -> None:
         updated_at = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -549,7 +557,7 @@ class Store:
                 insert into runtime_settings(key, value, updated_at) values (?, ?, ?)
                 on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at
                 """,
-                (key, "true" if value else "false", updated_at),
+                (key, value, updated_at),
             )
 
     def save_ai_summary(self, summary: AiSummaryItem) -> AiSummaryItem:
@@ -845,10 +853,13 @@ def _ai_summary_item(row: sqlite3.Row) -> AiSummaryItem:
 
 
 def _ai_summary_title(kind: str) -> str:
+    if kind.startswith("direction_shift"):
+        return "方向突变复核"
     return {
         "opening_auction": "早盘方向探索",
         "midday": "午盘方向复盘",
         "closing": "晚盘方向复盘",
+        "direction_shift": "方向突变复核",
     }.get(kind, kind)
 
 

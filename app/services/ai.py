@@ -68,6 +68,7 @@ class AIAnalyst:
                         "只基于输入数据做方向探索，不承诺收益，不给绝对买卖命令。"
                         "输出中文，控制在260字以内。必须包含：最强方向、主力是否仍在、当前阶段、下一时段可能流向、反证/风险、操作建议只允许写观察/等待/小仓验证/防守。"
                         "必须区分确认主线、候选方向、单日脉冲和退潮方向；不要把成交额大直接等同主线。"
+                        "当summary_kind为direction_shift时，必须优先判断：方向是否真的切换、触发原因、是真切换还是脉冲、下一步等什么确认。"
                     ),
                 },
                 {
@@ -338,6 +339,7 @@ def _fallback_market_summary(kind: str, context: dict) -> str:
         "opening_auction": "早盘方向探索",
         "midday": "午盘方向复盘",
         "closing": "晚盘方向复盘",
+        "direction_shift": "方向突变复核",
     }
     directions = context.get("market_directions") or []
     plans = context.get("fixed_pool") or []
@@ -348,6 +350,12 @@ def _fallback_market_summary(kind: str, context: dict) -> str:
         f"{item.get('direction_label')} 状态{item.get('state')} 主线{item.get('mainline_probability')} 驻留{item.get('residency_score')} 承接{item.get('retention_score')}"
         for item in directions[:3]
     ) or "暂无明确方向"
+    if kind == "direction_shift":
+        event = context.get("direction_shift_event") or {}
+        reasons = "、".join(event.get("reasons") or []) or "方向结构出现变化"
+        previous = (event.get("previous") or {}).get("direction_label") or "上一方向"
+        current = (event.get("current") or {}).get("direction_label") or strongest
+        return f"方向突变复核：{previous}切到{current}，触发原因：{reasons}。当前仍按{top_state}处理，先看资金驻留和龙头/二龙承接，不把一次脉冲直接当主线。"
     return f"{titles.get(kind, kind)}：最强方向为{strongest}，状态{top_state}。方向队列：{direction_text}。建议只观察资金驻留、龙头/二龙承接和退潮反证，不追单日脉冲。"
 
 

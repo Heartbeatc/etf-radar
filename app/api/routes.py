@@ -144,6 +144,7 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
         report = build_quant_decision_report(market_flow_report, pool_report, action_report)
         report = await runtime.attach_ai_trade_reviews(report)
+        await runtime.generate_direction_shift_summary(market_flow_report)
         report.ai_direction_summaries = runtime.store.latest_ai_summaries(limit=3)
         return report
 

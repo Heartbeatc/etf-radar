@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import suppress
 from datetime import datetime, timezone
 
@@ -356,6 +357,9 @@ class Runtime:
             trade_review_calls_used_today=self.store.ai_call_count(date, purpose="trade_risk_review"),
             trade_review_cooldown_seconds=self.settings.ai_trade_review_cooldown_seconds,
             trade_review_max_per_run=self.settings.ai_trade_review_max_per_run,
+            direction_shift_daily_call_limit=self.settings.ai_direction_shift_daily_call_limit,
+            direction_shift_calls_used_today=self.store.ai_call_count(date, purpose="direction_shift"),
+            direction_shift_cooldown_seconds=self.settings.ai_direction_shift_cooldown_seconds,
             windows=summary_windows_payload(),
         )
 
@@ -380,6 +384,9 @@ class Runtime:
             item = await self.generate_ai_summary(kind=kind, force=False)
             if item is not None:
                 result.append(item)
+        shift_item = await self.generate_direction_shift_summary()
+        if shift_item is not None:
+            result.append(shift_item)
         return result
 
     async def generate_ai_summary(self, kind: str, force: bool = False) -> AiSummaryItem | None:
@@ -419,7 +426,9 @@ class Runtime:
                 payload={"context": context},
             )
             self.store.log_ai_call("market_summary", kind, date, "ok")
-            return self.store.save_ai_summary(item)
+            saved = self.store.save_ai_summary(item)
+            self._remember_direction_state_from_context(context)
+            return saved
         except Exception as exc:
             error = str(exc)[:300]
             self.store.log_ai_call("market_summary", kind, date, "error", error=error)
@@ -433,7 +442,133 @@ class Runtime:
                 error=error,
                 payload={"context": context},
             )
+            saved = self.store.save_ai_summary(item)
+            self._remember_direction_state_from_context(context)
+            return saved
+
+    async def generate_direction_shift_summary(
+        self,
+        market_flow_report: MarketFlowResponse | None = None,
+    ) -> AiSummaryItem | None:
+        if not self.ai_enabled() or not self.settings.deepseek_api_key:
+            return None
+        if self.settings.ai_direction_shift_daily_call_limit <= 0:
+            return None
+        date = trading_date()
+        existing = self.store.ai_summary_for("direction_shift", date)
+        market_flow = market_flow_report
+        if market_flow is None:
+            try:
+                market_flow = await self.market_flow(force=False)
+            except Exception:
+                return existing
+        event = self._direction_shift_event(market_flow)
+        if event is None:
+            return None
+        if self.store.ai_call_count(date, purpose="direction_shift") >= self.settings.ai_direction_shift_daily_call_limit:
+            self._remember_direction_state(event["current"])
+            return existing
+        last_call_at = _parse_datetime(self.store.get_text_setting("ai_direction_shift_last_call_at", ""))
+        now = datetime.now(timezone.utc)
+        if last_call_at and (now - last_call_at).total_seconds() < self.settings.ai_direction_shift_cooldown_seconds:
+            return existing
+
+        plans = self.build_rule_plans()
+        snapshots = self.store.latest_snapshots()
+        extra_context = {
+            "direction_shift_event": event,
+            "summary_focus": [
+                "判断方向是否真的切换，而不是只看一轮成交额放大",
+                "解释触发原因：方向、阶段、主线概率、主力状态哪一项变了",
+                "区分新主线、候选切换和单日脉冲",
+                "说明下一步等什么确认，以及哪些反证会否定切换",
+            ],
+        }
+        context, source_data_time = build_ai_context(
+            self.settings,
+            plans,
+            market_flow,
+            snapshots,
+            kind="direction_shift",
+            extra_context=extra_context,
+        )
+        try:
+            summary_text = await self.ai.summarize_market("direction_shift", context)
+            item = make_summary_item(
+                kind="direction_shift",
+                trading_date_value=date,
+                model=self.settings.deepseek_model,
+                summary=summary_text,
+                source_data_time=source_data_time,
+                payload={"context": context},
+            )
+            self.store.log_ai_call("direction_shift", event["trigger"], date, "ok")
+            self.store.set_text_setting("ai_direction_shift_last_call_at", now.isoformat())
+            self._remember_direction_state(event["current"])
             return self.store.save_ai_summary(item)
+        except Exception as exc:
+            error = str(exc)[:300]
+            self.store.log_ai_call("direction_shift", event["trigger"], date, "error", error=error)
+            self.store.set_text_setting("ai_direction_shift_last_call_at", now.isoformat())
+            self._remember_direction_state(event["current"])
+            item = make_summary_item(
+                kind="direction_shift",
+                trading_date_value=date,
+                model=self.settings.deepseek_model,
+                summary="方向突变复核生成失败，暂以规则引擎方向变化为准。",
+                source_data_time=source_data_time,
+                status="error",
+                error=error,
+                payload={"context": context},
+            )
+            return self.store.save_ai_summary(item)
+
+    def _direction_shift_event(self, market_flow: MarketFlowResponse) -> dict | None:
+        if not market_flow.directions:
+            return None
+        current = _direction_state_payload(market_flow.directions[0])
+        previous = self._previous_direction_state()
+        if previous is None:
+            self._remember_direction_state(current)
+            return None
+        reasons = _direction_shift_reasons(previous, current, self.settings.ai_direction_shift_probability_delta)
+        if not reasons:
+            self._remember_direction_state(current)
+            return None
+        return {
+            "trigger": "+".join(reasons),
+            "previous": previous,
+            "current": current,
+            "reasons": reasons,
+            "thresholds": {
+                "probability_delta": self.settings.ai_direction_shift_probability_delta,
+                "cooldown_seconds": self.settings.ai_direction_shift_cooldown_seconds,
+                "daily_limit": self.settings.ai_direction_shift_daily_call_limit,
+            },
+        }
+
+    def _previous_direction_state(self) -> dict | None:
+        raw = self.store.get_text_setting("ai_direction_shift_last_state", "")
+        if raw:
+            try:
+                value = json.loads(raw)
+                if isinstance(value, dict) and value.get("direction_key"):
+                    return value
+            except Exception:
+                pass
+        for summary in self.store.latest_ai_summaries(limit=5):
+            state = _summary_top_direction_state(summary.payload)
+            if state is not None:
+                return state
+        return None
+
+    def _remember_direction_state_from_context(self, context: dict) -> None:
+        state = _summary_top_direction_state({"context": context})
+        if state is not None:
+            self._remember_direction_state(state)
+
+    def _remember_direction_state(self, state: dict) -> None:
+        self.store.set_text_setting("ai_direction_shift_last_state", json.dumps(state, ensure_ascii=False, sort_keys=True))
 
     async def attach_ai_trade_reviews(self, report: QuantDecisionResponse) -> QuantDecisionResponse:
         events = self._trade_review_events(report)[: self.settings.ai_trade_review_max_per_run]
@@ -676,6 +811,77 @@ class Runtime:
             self._integration_errors["clickhouse"] = self.clickhouse.last_error
         except Exception as exc:
             self._integration_errors["clickhouse"] = str(exc)[:300]
+
+
+def _direction_state_payload(direction) -> dict:
+    return {
+        "direction_key": direction.direction_key,
+        "direction_label": direction.direction_label,
+        "state": direction.state,
+        "mainline_probability": direction.mainline_probability,
+        "residency_score": direction.residency_score,
+        "retention_score": direction.retention_score,
+        "capital_status": direction.capital_status,
+        "trade_action": direction.trade_action,
+        "seven_day_score": direction.factor_scores.get("seven_day_score", 0),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _summary_top_direction_state(payload: dict) -> dict | None:
+    context = payload.get("context") if isinstance(payload, dict) else None
+    if not isinstance(context, dict):
+        return None
+    directions = context.get("market_directions") or []
+    if not directions:
+        return None
+    top = directions[0]
+    if not isinstance(top, dict) or not top.get("direction_label"):
+        return None
+    return {
+        "direction_key": top.get("direction_key") or _direction_key_from_label(str(top.get("direction_label") or "")),
+        "direction_label": top.get("direction_label"),
+        "state": top.get("state"),
+        "mainline_probability": int(top.get("mainline_probability") or top.get("score") or 0),
+        "residency_score": int(top.get("residency_score") or 0),
+        "retention_score": int(top.get("retention_score") or 0),
+        "capital_status": top.get("capital_status"),
+        "trade_action": top.get("trade_action"),
+        "seven_day_score": int((top.get("factor_scores") or {}).get("seven_day_score") or 0),
+    }
+
+
+def _direction_shift_reasons(previous: dict, current: dict, probability_delta: int) -> list[str]:
+    reasons: list[str] = []
+    if previous.get("direction_key") != current.get("direction_key"):
+        reasons.append("第一方向切换")
+    if previous.get("state") != current.get("state"):
+        reasons.append("阶段切换")
+    previous_probability = int(previous.get("mainline_probability") or 0)
+    current_probability = int(current.get("mainline_probability") or 0)
+    if abs(current_probability - previous_probability) >= probability_delta:
+        reasons.append("主线概率大幅变化")
+    if previous.get("capital_status") != current.get("capital_status"):
+        reasons.append("主力状态变化")
+    if previous.get("trade_action") != current.get("trade_action"):
+        reasons.append("交易阶段变化")
+    return reasons
+
+
+def _direction_key_from_label(label: str) -> str:
+    return label.strip().lower().replace("/", "_").replace(" ", "_") or "unknown"
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _top(plans: list[TradePlan], field: str) -> str | None:

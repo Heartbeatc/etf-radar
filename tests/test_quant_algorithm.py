@@ -1,9 +1,10 @@
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 from tempfile import TemporaryDirectory
 
 from app.core.config import Settings
-from app.core.runtime import Runtime, _review_side_for_fixed_action
+from app.core.runtime import Runtime, _direction_shift_reasons, _review_side_for_fixed_action
 from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
 from app.services.ai_summary import CN_TZ, due_summary_kinds, summary_title
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
@@ -362,9 +363,55 @@ def test_direction_ai_summary_windows_are_three_daily_slots():
     assert summary_title("opening_auction") == "早盘方向探索"
     assert summary_title("midday") == "午盘方向复盘"
     assert summary_title("closing") == "晚盘方向复盘"
+    assert summary_title("direction_shift") == "方向突变复核"
 
 
 def test_quant_decision_response_exposes_direction_ai_summaries_field():
     report = build_quant_decision_report(flow_report([direction("candidate", [], probability=66, low_buy=58)]))
 
     assert report.ai_direction_summaries == []
+
+
+
+def test_direction_shift_reasons_detect_meaningful_top_direction_change():
+    previous = {
+        "direction_key": "gold_resources",
+        "direction_label": "黄金/资源",
+        "state": "candidate",
+        "mainline_probability": 67,
+        "capital_status": "试探",
+        "trade_action": "observe",
+    }
+    current = {
+        "direction_key": "robotics_highend",
+        "direction_label": "机器人/高端制造",
+        "state": "candidate",
+        "mainline_probability": 66,
+        "capital_status": "试探",
+        "trade_action": "observe",
+    }
+
+    assert "第一方向切换" in _direction_shift_reasons(previous, current, probability_delta=12)
+
+
+
+def test_direction_shift_event_uses_last_reviewed_state_and_ignores_small_noise():
+    with TemporaryDirectory() as tmpdir:
+        runtime = Runtime(Settings(database_path=f"{tmpdir}/radar.sqlite3", api_polling_enabled=False))
+        previous = {
+            "direction_key": "robotics_highend",
+            "direction_label": "机器人/高端制造",
+            "state": "candidate",
+            "mainline_probability": 66,
+            "capital_status": "今日资金集中，等待次日承接",
+            "trade_action": "observe_next_day_retention",
+        }
+        runtime.store.set_text_setting("ai_direction_shift_last_state", json.dumps(previous, ensure_ascii=False))
+        noisy = direction("candidate", [], probability=70, direction_key="robotics_highend", direction_label="机器人/高端制造")
+        shifted = direction("candidate", [], probability=66, direction_key="gold_resources", direction_label="黄金/资源")
+
+        assert runtime._direction_shift_event(flow_report([noisy])) is None
+        event = runtime._direction_shift_event(flow_report([shifted]))
+
+    assert event is not None
+    assert "第一方向切换" in event["reasons"]

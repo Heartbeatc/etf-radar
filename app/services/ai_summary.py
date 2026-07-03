@@ -10,7 +10,7 @@ from app.services.data_quality import build_data_quality_report
 from app.services.risk import build_risk_report
 
 CN_TZ = ZoneInfo("Asia/Shanghai")
-SUMMARY_KINDS = ("opening_auction", "midday", "closing")
+SUMMARY_KINDS = ("opening_auction", "midday", "closing", "direction_shift")
 SUMMARY_WINDOWS: dict[str, tuple[time, time]] = {
     "opening_auction": (time(9, 25), time(10, 10)),
     "midday": (time(11, 30), time(13, 5)),
@@ -20,6 +20,7 @@ SUMMARY_TITLES = {
     "opening_auction": "早盘方向探索",
     "midday": "午盘方向复盘",
     "closing": "晚盘方向复盘",
+    "direction_shift": "方向突变复核",
 }
 
 
@@ -49,6 +50,8 @@ def summary_windows_payload() -> list[dict[str, str]]:
 
 
 def summary_title(kind: str) -> str:
+    if kind.startswith("direction_shift"):
+        return SUMMARY_TITLES["direction_shift"]
     return SUMMARY_TITLES.get(kind, kind)
 
 
@@ -58,13 +61,14 @@ def build_ai_context(
     market_flow: MarketFlowResponse | None,
     snapshots: dict,
     kind: str | None = None,
+    extra_context: dict | None = None,
 ) -> tuple[dict, datetime | None]:
     fixed_snapshots = [snapshots.get(plan.code) for plan in plans]
     data_times = [item.source_time for item in fixed_snapshots if item and item.source_time]
     source_data_time = max(data_times) if data_times else None
     risk = build_risk_report(plans)
     data_quality = build_data_quality_report(settings, snapshots)
-    return {
+    context = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_data_time": source_data_time.isoformat() if source_data_time else None,
         "summary_kind_title": summary_title(kind or _current_summary_kind()),
@@ -89,7 +93,10 @@ def build_ai_context(
             "下一时段资金可能继续流向哪里，以及需要哪些反证",
             "只给方向探索和观察建议，不给绝对买卖命令",
         ],
-    }, source_data_time
+    }
+    if extra_context:
+        context.update(extra_context)
+    return context, source_data_time
 
 
 def make_summary_item(
@@ -118,6 +125,7 @@ def make_summary_item(
 
 def _direction_payload(item) -> dict:
     return {
+        "direction_key": item.direction_key,
         "direction_label": item.direction_label,
         "score": item.score,
         "state": item.state,

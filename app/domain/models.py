@@ -168,6 +168,9 @@ class AiStatus(BaseModel):
     trade_review_calls_used_today: int
     trade_review_cooldown_seconds: int
     trade_review_max_per_run: int
+    direction_shift_daily_call_limit: int = 0
+    direction_shift_calls_used_today: int = 0
+    direction_shift_cooldown_seconds: int = 0
     windows: list[dict[str, str]]
 
 

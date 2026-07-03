@@ -1,4 +1,5 @@
-import type { QuantDecisionResponse, QuantDirectionDecision, QuantStockDecision } from '../../types';
+import { useState } from 'react';
+import type { PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
@@ -6,14 +7,58 @@ interface QuantWorkbenchProps {
   onRefresh: () => void;
   refreshing: boolean;
   onLogout: () => void;
+  onSavePosition: (code: string, input: PositionInput) => void;
+  onDeletePosition: (code: string) => void;
+  savingPosition: boolean;
+  deletingPosition: boolean;
   errorMessage: string | null;
 }
 
-export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, errorMessage }: QuantWorkbenchProps) {
+export function QuantWorkbench({
+  decision,
+  onRefresh,
+  refreshing,
+  onLogout,
+  onSavePosition,
+  onDeletePosition,
+  savingPosition,
+  deletingPosition,
+  errorMessage
+}: QuantWorkbenchProps) {
   const direction = decision?.direction;
+  const holdings = decision?.holdings ?? [];
   const stocks = pickStocks(decision?.bottom_candidates ?? []);
-  const rows = stocks.length ? stocks : [null];
+  const candidateRows = stocks.length ? stocks : [null];
   const status = capitalStatus(direction);
+  const [code, setCode] = useState('');
+  const [entryPrice, setEntryPrice] = useState('');
+  const [shares, setShares] = useState('');
+  const [entryDate, setEntryDate] = useState(todayText());
+  const [note, setNote] = useState('');
+
+  const save = () => {
+    const normalized = code.trim();
+    const parsedEntry = Number(entryPrice);
+    const parsedShares = shares.trim() ? Number(shares) : null;
+    if (!/^\d{6}$/.test(normalized)) {
+      window.alert('请输入6位A股代码');
+      return;
+    }
+    if (!Number.isFinite(parsedEntry) || parsedEntry <= 0) {
+      window.alert('请输入有效成本价');
+      return;
+    }
+    if (parsedShares !== null && (!Number.isFinite(parsedShares) || parsedShares <= 0)) {
+      window.alert('数量必须大于0，或留空');
+      return;
+    }
+    onSavePosition(normalized, {
+      entry_price: parsedEntry,
+      shares: parsedShares,
+      entry_date: entryDate || null,
+      note: note.trim()
+    });
+  };
 
   return (
     <main className="excel-page">
@@ -33,17 +78,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
         </colgroup>
         <thead>
           <tr className="excel-letters">
-            <th></th>
-            <th>A</th>
-            <th>B</th>
-            <th>C</th>
-            <th>D</th>
-            <th>E</th>
-            <th>F</th>
-            <th>G</th>
-            <th>H</th>
-            <th>I</th>
-            <th>J</th>
+            <th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th>I</th><th>J</th>
           </tr>
         </thead>
         <tbody>
@@ -62,25 +97,55 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
               <button type="button" onClick={onLogout}>退出</button>
             </td>
           </tr>
-          <tr className="excel-header-row">
+          <tr className="position-entry-row">
             <th className="row-index">2</th>
+            <td className="sheet-title">录入持仓</td>
+            <td><input value={code} onChange={(event) => setCode(event.target.value)} placeholder="代码" maxLength={6} /></td>
+            <td><input value={entryPrice} onChange={(event) => setEntryPrice(event.target.value)} placeholder="成本" inputMode="decimal" /></td>
+            <td><input value={shares} onChange={(event) => setShares(event.target.value)} placeholder="数量可空" inputMode="decimal" /></td>
+            <td><input value={entryDate} onChange={(event) => setEntryDate(event.target.value)} type="date" /></td>
+            <td colSpan={3}><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注可空" /></td>
+            <td className="sheet-meta">保存后加入30秒监控</td>
+            <td className="sheet-actions"><button type="button" onClick={save} disabled={savingPosition}>{savingPosition ? '保存中' : '保存'}</button></td>
+          </tr>
+          <tr className="excel-header-row">
+            <th className="row-index">3</th>
             <td>最近方向</td>
             <td>主力在不在</td>
             <td>阶段</td>
-            <td>抄底候选</td>
-            <td>现价</td>
-            <td>低吸区</td>
+            <td>持仓/候选</td>
+            <td>现价/盈亏</td>
+            <td>低吸/反抽</td>
             <td>触发信号</td>
             <td>防守/止盈</td>
             <td>撤退规则</td>
             <td>动作</td>
           </tr>
-          {rows.map((stock, index) => (
-            <tr key={stock?.code ?? `empty-${index}`}>
-              <th className="row-index">{index + 3}</th>
+          {holdings.map((holding, index) => (
+            <tr key={`holding-${holding.code}`} className="holding-row">
+              <th className="row-index">{index + 4}</th>
               <td>{index === 0 ? formatDirection(direction) : ''}</td>
               <td>{index === 0 ? formatCapital(status, direction) : ''}</td>
               <td>{index === 0 ? formatPhase(direction) : ''}</td>
+              <td>{formatHoldingName(holding)}</td>
+              <td>{formatHoldingPrice(holding)}</td>
+              <td>{formatHoldingRebound(holding)}</td>
+              <td>{formatHoldingMainForce(holding)}</td>
+              <td>{formatHoldingRisk(holding)}</td>
+              <td>{holding.exit_plan}</td>
+              <td>{formatHoldingAction(holding, onDeletePosition, deletingPosition)}</td>
+            </tr>
+          ))}
+          <tr className="excel-header-row subtle-header">
+            <th className="row-index">{holdings.length + 4}</th>
+            <td colSpan={10}>空仓候选：只有价格、方向、承接同时满足才考虑小仓试错</td>
+          </tr>
+          {candidateRows.map((stock, index) => (
+            <tr key={stock?.code ?? `empty-${index}`}>
+              <th className="row-index">{holdings.length + index + 5}</th>
+              <td>{holdings.length === 0 && index === 0 ? formatDirection(direction) : ''}</td>
+              <td>{holdings.length === 0 && index === 0 ? formatCapital(status, direction) : ''}</td>
+              <td>{holdings.length === 0 && index === 0 ? formatPhase(direction) : ''}</td>
               <td>{stock ? formatStock(stock) : '暂无可抄底股票'}</td>
               <td>{stock ? formatPriceCell(stock) : '-'}</td>
               <td>{stock ? formatZone(stock) : '-'}</td>
@@ -92,7 +157,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
           ))}
           {errorMessage && (
             <tr>
-              <th className="row-index">{rows.length + 3}</th>
+              <th className="row-index">{holdings.length + candidateRows.length + 5}</th>
               <td className="sheet-error" colSpan={10}>{errorMessage}</td>
             </tr>
           )}
@@ -150,6 +215,64 @@ function formatPhase(direction?: QuantDirectionDecision) {
     <>
       <strong>{direction?.phase_label ?? '无数据'}</strong>
       <span>{direction?.confidence ? `置信 ${confidenceLabel(direction.confidence)}` : '-'}</span>
+    </>
+  );
+}
+
+function formatHoldingName(item: QuantHoldingDecision) {
+  return (
+    <>
+      <strong>持仓 {item.code} {item.name}</strong>
+      <span>成本 {formatPrice(item.entry_price)} / 买入日 {item.entry_date ?? '-'}</span>
+    </>
+  );
+}
+
+function formatHoldingPrice(item: QuantHoldingDecision) {
+  const pnl = item.floating_profit_pct == null ? '-' : `${item.floating_profit_pct.toFixed(2)}%`;
+  const amount = item.floating_profit_amount == null ? null : ` / 盈亏 ${item.floating_profit_amount.toFixed(2)}`;
+  return (
+    <>
+      <strong>{formatPrice(item.current_price)}</strong>
+      <span className={pnl.startsWith('-') ? 'loss-text' : 'profit-text'}>浮盈亏 {pnl}{amount}</span>
+    </>
+  );
+}
+
+function formatHoldingRebound(item: QuantHoldingDecision) {
+  return (
+    <>
+      <strong>反抽 {formatPrice(item.rebound_reduce_price)}</strong>
+      <span>{item.can_add_position ? '允许极小幅滚动' : '不补仓'}</span>
+    </>
+  );
+}
+
+function formatHoldingMainForce(item: QuantHoldingDecision) {
+  return (
+    <>
+      <strong>{mainForceLabel(item.main_force_state)}</strong>
+      <span>{directionMatchLabel(item.direction_match)} {item.related_direction_label ?? ''}</span>
+    </>
+  );
+}
+
+function formatHoldingRisk(item: QuantHoldingDecision) {
+  return (
+    <>
+      <strong>弱防 {formatPrice(item.weak_exit_price)}</strong>
+      <span>止损 {formatPrice(item.stop_price)} / 止盈 {formatPrice(item.take_profit_price)}</span>
+    </>
+  );
+}
+
+function formatHoldingAction(item: QuantHoldingDecision, onDelete: (code: string) => void, deleting: boolean) {
+  return (
+    <>
+      <strong className={`holding-action holding-${item.risk_level}`}>{item.action_label}</strong>
+      <span>{item.position_plan}</span>
+      {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(item.ai_risk_review.risk_level)}：{item.ai_risk_review.conclusion}</span> : null}
+      <button type="button" className="link-button" onClick={() => onDelete(item.code)} disabled={deleting}>删除持仓</button>
     </>
   );
 }
@@ -213,31 +336,28 @@ function formatActionCell(item: QuantStockDecision) {
       <strong className={`action-${execution?.decision_state ?? 'monitor'}`}>{execution?.decision_label ?? actionLabel(item.action)}</strong>
       <span>{execution?.decision_reason ?? item.operation}</span>
       {execution?.position_plan ? <span>{execution.position_plan}</span> : null}
-      {execution?.ai_risk_review ? (
-        <span className={`ai-risk ai-risk-${execution.ai_risk_review.risk_level}`}>
-          AI风险 {riskLevelLabel(execution.ai_risk_review.risk_level)}：{execution.ai_risk_review.conclusion}
-        </span>
-      ) : null}
+      {execution?.ai_risk_review ? <span className={`ai-risk ai-risk-${execution.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(execution.ai_risk_review.risk_level)}：{execution.ai_risk_review.conclusion}</span> : null}
     </>
   );
 }
 
+function mainForceLabel(value: string) {
+  const map: Record<string, string> = { present: '主力在', watch: '试探', weak: '走弱', left: '疑似撤退', unknown: '未知' };
+  return map[value] ?? value;
+}
+
+function directionMatchLabel(value: string) {
+  const map: Record<string, string> = { frontline: '前排方向', related: '相关方向', not_frontline: '非前排', unknown: '未知' };
+  return map[value] ?? value;
+}
+
 function riskLevelLabel(value: string | null | undefined): string {
-  const map: Record<string, string> = {
-    low: '低',
-    medium: '中',
-    high: '高',
-    unknown: '未知'
-  };
+  const map: Record<string, string> = { low: '低', medium: '中', high: '高', unknown: '未知' };
   return value ? map[value] ?? value : '未知';
 }
 
 function stockRoleLabel(value: string | null | undefined): string {
-  const map: Record<string, string> = {
-    leader: '龙头',
-    second_leader: '二龙',
-    expansion: '扩散'
-  };
+  const map: Record<string, string> = { leader: '龙头', second_leader: '二龙', expansion: '扩散' };
   return value ? map[value] ?? value : '候选';
 }
 
@@ -253,12 +373,7 @@ function capitalStatus(direction?: QuantDirectionDecision): { label: string; kin
 }
 
 function confidenceLabel(value: string): string {
-  const map: Record<string, string> = {
-    high: '高',
-    medium: '中',
-    'medium-low': '中低',
-    low: '低'
-  };
+  const map: Record<string, string> = { high: '高', medium: '中', 'medium-low': '中低', low: '低' };
   return map[value] ?? value;
 }
 
@@ -290,4 +405,8 @@ function formatPrice(value: number | null | undefined): string {
 function formatRange(low: number | null | undefined, high: number | null | undefined): string {
   if (low == null || high == null) return '-';
   return `${low.toFixed(2)} - ${high.toFixed(2)}`;
+}
+
+function todayText() {
+  return new Date().toISOString().slice(0, 10);
 }

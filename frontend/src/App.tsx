@@ -60,6 +60,25 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
+  const savePositionMutation = useMutation({
+    mutationFn: ({ code, input }: { code: string; input: { entry_price: number; shares: number | null; entry_date: string | null; note: string } }) =>
+      api.upsertPosition(sessionToken, code, input),
+    onSuccess: () => {
+      message.success('持仓已保存');
+      queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const deletePositionMutation = useMutation({
+    mutationFn: (code: string) => api.deletePosition(sessionToken, code),
+    onSuccess: () => {
+      message.success('持仓已删除');
+      queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
   const submitLogin = () => {
     if (!loginUsername.trim() || !loginPassword) {
       message.warning('用户名和密码不能为空');
@@ -90,6 +109,10 @@ function App() {
             onRefresh={() => forceRefreshMutation.mutate()}
             refreshing={forceRefreshMutation.isPending || decisionQuery.isFetching}
             onLogout={logout}
+            onSavePosition={(code, input) => savePositionMutation.mutate({ code, input })}
+            onDeletePosition={(code) => deletePositionMutation.mutate(code)}
+            savingPosition={savePositionMutation.isPending}
+            deletingPosition={deletePositionMutation.isPending}
             errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : null}
           />
         )}

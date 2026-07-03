@@ -61,6 +61,7 @@ class Store:
                     code text primary key,
                     entry_price real not null,
                     shares real,
+                    entry_date text,
                     note text not null default '',
                     updated_at text not null
                 );
@@ -207,6 +208,9 @@ class Store:
             conn.execute(
                 "insert into schema_meta(key, value) values('schema_version', '2') on conflict(key) do update set value = excluded.value"
             )
+            columns = {row[1] for row in conn.execute("pragma table_info(positions)").fetchall()}
+            if "entry_date" not in columns:
+                conn.execute("alter table positions add column entry_date text")
 
     def save_snapshots(self, snapshots: list[EtfSnapshot]) -> None:
         with self._lock, self._connect() as conn:
@@ -371,14 +375,15 @@ class Store:
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                insert into positions(code, entry_price, shares, note, updated_at) values (?, ?, ?, ?, ?)
+                insert into positions(code, entry_price, shares, entry_date, note, updated_at) values (?, ?, ?, ?, ?, ?)
                 on conflict(code) do update set
                     entry_price = excluded.entry_price,
                     shares = excluded.shares,
+                    entry_date = excluded.entry_date,
                     note = excluded.note,
                     updated_at = excluded.updated_at
                 """,
-                (code, position.entry_price, position.shares, position.note, updated_at.isoformat()),
+                (code, position.entry_price, position.shares, position.entry_date, position.note, updated_at.isoformat()),
             )
         return Position(code=code, updated_at=updated_at, **position.model_dump())
 
@@ -396,6 +401,7 @@ class Store:
                 code=row["code"],
                 entry_price=row["entry_price"],
                 shares=row["shares"],
+                entry_date=row["entry_date"],
                 note=row["note"],
                 updated_at=datetime.fromisoformat(row["updated_at"]),
             )

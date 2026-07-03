@@ -16,6 +16,7 @@ export interface HealthResponse {
 export interface PositionInput {
   entry_price: number;
   shares: number | null;
+  entry_date: string | null;
   note: string;
 }
 
@@ -371,6 +372,38 @@ export interface QuantStockDecision {
   risk_flags: string[];
 }
 
+export interface QuantHoldingDecision {
+  code: string;
+  name: string;
+  entry_price: number;
+  entry_date: string | null;
+  shares: number | null;
+  current_price: number | null;
+  source_time: string | null;
+  updated_at: string;
+  floating_profit_pct: number | null;
+  floating_profit_amount: number | null;
+  market_value: number | null;
+  action: string;
+  action_label: string;
+  urgency: string;
+  risk_level: string;
+  main_force_state: string;
+  direction_match: string;
+  related_direction_label: string | null;
+  can_add_position: boolean;
+  stop_price: number | null;
+  weak_exit_price: number | null;
+  rebound_reduce_price: number | null;
+  take_profit_price: number | null;
+  position_plan: string;
+  exit_plan: string;
+  conditions: QuantStockExecutionCondition[];
+  reasons: string[];
+  risk_flags: string[];
+  ai_risk_review: AiTradeRiskReview | null;
+}
+
 export interface QuantDecisionResponse {
   generated_at: string;
   market_status: string;
@@ -379,6 +412,7 @@ export interface QuantDecisionResponse {
   etfs: QuantEtfDecision[];
   stocks: QuantStockDecision[];
   bottom_candidates: QuantStockDecision[];
+  holdings: QuantHoldingDecision[];
   fixed_pool_actions: QuantEtfDecision[];
   ai_risk_reviews: AiTradeRiskReview[];
   ai_direction_summaries: AiSummaryItem[];

@@ -684,6 +684,36 @@ class Runtime:
                     "reasons": item.reasons[:6],
                 }
             )
+        for item in report.holdings:
+            side = _review_side_for_holding_action(item.action)
+            if side is None:
+                continue
+            events.append(
+                {
+                    "kind": "holding_" + side.lower(),
+                    "review_key": f"{date}:holding:{item.code}:{side}:{item.action}:{item.risk_level}",
+                    "code": item.code,
+                    "name": item.name,
+                    "side": side,
+                    "action": item.action,
+                    "trading_date": date,
+                    "direction": {"label": item.related_direction_label, "match": item.direction_match},
+                    "price": item.current_price,
+                    "entry_price": item.entry_price,
+                    "floating_profit_pct": item.floating_profit_pct,
+                    "main_force_state": item.main_force_state,
+                    "risk_level": item.risk_level,
+                    "stop_price": item.stop_price,
+                    "weak_exit_price": item.weak_exit_price,
+                    "rebound_reduce_price": item.rebound_reduce_price,
+                    "take_profit_price": item.take_profit_price,
+                    "trigger_signal": item.position_plan,
+                    "invalidation": [item.exit_plan],
+                    "conditions": [condition.model_dump(mode="json") for condition in item.conditions],
+                    "risk_flags": item.risk_flags[:6],
+                    "reasons": item.reasons[:6],
+                }
+            )
         return events
 
     def _attach_ai_trade_review(self, report: QuantDecisionResponse, review: AiTradeRiskReview) -> None:
@@ -691,6 +721,9 @@ class Runtime:
             if stock.code == review.code and stock.execution is not None:
                 stock.execution.ai_risk_review = review
         for item in [*report.etfs, *report.fixed_pool_actions]:
+            if item.code == review.code:
+                item.ai_risk_review = review
+        for item in report.holdings:
             if item.code == review.code:
                 item.ai_risk_review = review
 
@@ -905,6 +938,12 @@ def _review_side_for_fixed_action(action: str) -> str | None:
     if action == "BUY_FIRST_BATCH":
         return "BUY"
     if action in {"SELL_ALL", "SELL_PARTIAL_50", "SELL_PARTIAL_20_30", "REDUCE_OR_HOLD_TIGHT"}:
+        return "SELL"
+    return None
+
+
+def _review_side_for_holding_action(action: str) -> str | None:
+    if action in {"EXIT", "REDUCE_OR_EXIT", "REDUCE_ON_REBOUND", "TAKE_PROFIT"}:
         return "SELL"
     return None
 

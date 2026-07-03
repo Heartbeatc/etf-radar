@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 from app.core.config import Settings
 from app.core.runtime import Runtime, _direction_shift_reasons, _review_side_for_fixed_action
-from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
+from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse, Position, TradePlan
 from app.services.ai_summary import CN_TZ, due_summary_kinds, summary_title
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
@@ -351,6 +351,60 @@ def test_ai_trade_review_uses_cache_for_same_opportunity():
 
     asyncio.run(run_check())
 
+
+
+def test_quant_decision_prioritizes_registered_holding_risk():
+    position = Position(
+        code="600487",
+        entry_price=92.4,
+        shares=None,
+        entry_date="2026-07-03",
+        note="test",
+        updated_at=datetime.now(timezone.utc),
+    )
+    plan = TradePlan(
+        code="600487",
+        name="亨通光电",
+        role="position",
+        data_state="fresh",
+        signal="hold_watch",
+        confidence="medium",
+        direction_score=45,
+        low_buy_score=35,
+        hold_score=48,
+        take_profit_score=30,
+        risk_score=62,
+        current_price=89.42,
+        source_time=datetime.now(timezone.utc),
+        fetched_at=datetime.now(timezone.utc),
+        buy_zone={"zone_low": 88.8, "zone_high": 90.2, "avoid_above": 91.5},
+        hold_plan={"floating_profit_pct": -3.23},
+        take_profit_plan={"first_take_profit_price": 97.94},
+        exit_plan={"hard_stop_price": 88.7, "effective_exit_price": 90.5},
+        evidence=["price below MA10"],
+        warnings=["estimated big-order flow is sharply negative"],
+    )
+    report = build_quant_decision_report(
+        flow_report([direction("candidate", [], probability=66, low_buy=58)]),
+        positions={"600487": position},
+        plans=[plan],
+    )
+
+    holding = report.holdings[0]
+    assert holding.code == "600487"
+    assert holding.action == "REDUCE_OR_EXIT"
+    assert holding.can_add_position is False
+    assert holding.floating_profit_pct == -3.23
+    assert "不补仓" in holding.position_plan
+    assert report.conclusion.startswith("持仓优先")
+
+    with TemporaryDirectory() as tmpdir:
+        runtime = Runtime(Settings(database_path=f"{tmpdir}/radar.sqlite3", api_polling_enabled=False, ai_enabled=False))
+        events = runtime._trade_review_events(report)
+
+    assert events
+    assert events[0]["side"] == "SELL"
+    assert events[0]["kind"] == "holding_sell"
 
 def test_direction_ai_summary_windows_are_three_daily_slots():
     opening = datetime(2026, 7, 3, 9, 30, tzinfo=CN_TZ)

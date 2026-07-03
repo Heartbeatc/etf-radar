@@ -265,6 +265,7 @@ def _risk_score(s: EtfSnapshot, m: dict[str, float | None], warnings: list[str])
         score += 18
     if s.main_net_inflow_pct is not None and s.main_net_inflow_pct < -8:
         score += 16
+        warnings.append("estimated big-order flow is sharply negative")
     if s.amplitude_pct is not None and s.amplitude_pct > 6:
         score += 8
     return _clamp(score)

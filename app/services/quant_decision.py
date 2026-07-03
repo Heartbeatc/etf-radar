@@ -11,27 +11,34 @@ from app.domain.models import (
     MarketStockCandidate,
     PoolRecommendationItem,
     PoolRecommendationResponse,
+    Position,
     QuantDecisionResponse,
     QuantDirectionDecision,
     QuantEtfDecision,
+    QuantHoldingDecision,
     QuantStockDecision,
     QuantStockExecutionCondition,
     QuantStockExecutionPlan,
+    TradePlan,
 )
+from app.services.holding_decision import build_holding_decisions
 
 
 def build_quant_decision_report(
     market_flow: MarketFlowResponse,
     pool: PoolRecommendationResponse | None = None,
     actions: ActionDecisionResponse | None = None,
+    positions: dict[str, Position] | None = None,
+    plans: list[TradePlan] | None = None,
 ) -> QuantDecisionResponse:
     top_direction = market_flow.directions[0] if market_flow.directions else None
     direction_decision = _direction_decision(top_direction)
     etfs = _etf_decisions(pool, actions) if pool is not None and actions is not None else []
     stocks = _stock_decisions(top_direction)
     bottom_candidates = _bottom_candidates(stocks)
+    holdings: list[QuantHoldingDecision] = build_holding_decisions(market_flow, positions or {}, plans or []) if positions else []
     fixed_actions = [_fixed_action_decision(item) for item in actions.items] if actions is not None else []
-    conclusion = _conclusion(direction_decision, stocks, fixed_actions)
+    conclusion = _conclusion(direction_decision, stocks, fixed_actions, holdings)
     warnings = [*market_flow.warnings[:4]]
     if top_direction and top_direction.state != "confirmed_mainline":
         warnings.insert(0, "当前方向不是确认主升，A股操作以等待回踩和验证承接为主。")
@@ -45,6 +52,7 @@ def build_quant_decision_report(
         etfs=etfs,
         stocks=stocks,
         bottom_candidates=bottom_candidates,
+        holdings=holdings,
         fixed_pool_actions=fixed_actions,
         warnings=_dedupe(warnings)[:8],
         assumptions=[
@@ -652,7 +660,16 @@ def _fixed_operation(item: ActionDecisionItem) -> str:
     return mapping.get(item.action, item.action)
 
 
-def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecision], fixed_actions: list[QuantEtfDecision]) -> str:
+def _conclusion(
+    direction: QuantDirectionDecision,
+    stocks: list[QuantStockDecision],
+    fixed_actions: list[QuantEtfDecision],
+    holdings: list[QuantHoldingDecision] | None = None,
+) -> str:
+    holdings = holdings or []
+    urgent_holding = next((item for item in holdings if item.action in {"EXIT", "REDUCE_OR_EXIT", "REDUCE_ON_REBOUND"}), None)
+    if urgent_holding:
+        return f"持仓优先：{urgent_holding.name} 当前{urgent_holding.action_label}，先处理风控，不要盲目补仓。"
     sell = [item for item in fixed_actions if item.action.startswith("SELL") or item.action == "REDUCE_OR_HOLD_TIGHT"]
     buy_probe = [item for item in stocks if item.bottom_state == "ready"]
     wait_buy = [item for item in stocks if item.bottom_state in {"wait_acceptance", "wait_price"}]

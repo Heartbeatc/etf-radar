@@ -65,6 +65,7 @@ class MinuteBar(BaseModel):
 class PositionInput(BaseModel):
     entry_price: float = Field(gt=0)
     shares: float | None = Field(default=None, gt=0)
+    entry_date: str | None = None
     note: str = ""
 
 
@@ -656,6 +657,38 @@ class QuantStockDecision(BaseModel):
     risk_flags: list[str]
 
 
+class QuantHoldingDecision(BaseModel):
+    code: str
+    name: str
+    entry_price: float
+    entry_date: str | None = None
+    shares: float | None = None
+    current_price: float | None = None
+    source_time: datetime | None = None
+    updated_at: datetime
+    floating_profit_pct: float | None = None
+    floating_profit_amount: float | None = None
+    market_value: float | None = None
+    action: str
+    action_label: str
+    urgency: str
+    risk_level: str
+    main_force_state: str
+    direction_match: str
+    related_direction_label: str | None = None
+    can_add_position: bool = False
+    stop_price: float | None = None
+    weak_exit_price: float | None = None
+    rebound_reduce_price: float | None = None
+    take_profit_price: float | None = None
+    position_plan: str
+    exit_plan: str
+    conditions: list[QuantStockExecutionCondition] = Field(default_factory=list)
+    reasons: list[str]
+    risk_flags: list[str]
+    ai_risk_review: AiTradeRiskReview | None = None
+
+
 class QuantDecisionResponse(BaseModel):
     generated_at: datetime
     market_status: str
@@ -664,6 +697,7 @@ class QuantDecisionResponse(BaseModel):
     etfs: list[QuantEtfDecision]
     stocks: list[QuantStockDecision]
     bottom_candidates: list[QuantStockDecision] = Field(default_factory=list)
+    holdings: list[QuantHoldingDecision] = Field(default_factory=list)
     fixed_pool_actions: list[QuantEtfDecision]
     ai_risk_reviews: list[AiTradeRiskReview] = Field(default_factory=list)
     ai_direction_summaries: list[AiSummaryItem] = Field(default_factory=list)

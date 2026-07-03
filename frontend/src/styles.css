@@ -36,138 +36,48 @@ input {
   background: #fff;
 }
 
-.excel-page {
+.quant-page {
   width: 100%;
-  overflow: auto;
-}
-
-.excel-sheet {
-  width: max(1540px, 100%);
-  border-collapse: collapse;
-  table-layout: fixed;
-  background: #fff;
   color: #111;
-  font-size: 12px;
-  line-height: 1.35;
 }
 
-.row-index-col {
-  width: 44px;
-}
-
-.direction-col {
-  width: 155px;
-}
-
-.capital-col {
-  width: 155px;
-}
-
-.phase-col {
-  width: 180px;
-}
-
-.stock-col {
-  width: 180px;
-}
-
-.price-col {
-  width: 132px;
-}
-
-.zone-col {
-  width: 145px;
-}
-
-.trigger-col {
-  width: 230px;
-}
-
-.risk-col {
-  width: 132px;
-}
-
-.exit-col {
-  width: 220px;
-}
-
-.action-col {
-  width: auto;
-}
-
-.excel-sheet th,
-.excel-sheet td {
-  height: 34px;
-  padding: 5px 7px;
+.quant-toolbar {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
   border: 1px solid #d9d9d9;
-  text-align: left;
-  vertical-align: middle;
-  white-space: normal;
-  word-break: break-word;
+  background: #fafafa;
+  padding: 8px 10px;
 }
 
-.excel-sheet thead th,
-.row-index {
-  background: #f3f3f3;
-  color: #444;
-  font-weight: 400;
-  text-align: center;
-}
-
-.excel-letters th {
-  height: 26px;
-  padding: 3px 8px;
-  font-size: 12px;
-}
-
-.excel-header-row td {
-  background: #f8f8f8;
-  font-weight: 700;
-}
-
-.sheet-title {
-  font-weight: 700;
-}
-
-.sheet-meta {
-  color: #666;
-}
-
-.clock-row td {
-  background: #fbfbfb;
-}
-
-.clock-row .sheet-meta strong {
-  color: #333;
-  font-size: 12px;
-}
-
-.ai-direction-summary {
-  color: #111 !important;
-  font-weight: 600;
-}
-
-.excel-sheet td strong {
+.quant-toolbar strong,
+.quant-toolbar span {
   display: block;
-  margin-bottom: 2px;
-  font-size: 12px;
+}
+
+.quant-toolbar strong {
+  font-size: 14px;
   font-weight: 700;
 }
 
-.excel-sheet td span {
-  display: block;
-  color: #666;
+.quant-toolbar span {
+  margin-top: 2px;
+  color: #555;
   font-size: 12px;
 }
 
-.sheet-actions {
+.toolbar-actions {
+  display: flex;
+  gap: 6px;
   white-space: nowrap;
 }
 
-.sheet-actions button {
-  height: 24px;
-  margin-right: 6px;
-  padding: 0 8px;
+button {
+  height: 26px;
+  padding: 0 10px;
   border: 1px solid #bfbfbf;
   border-radius: 0;
   background: #fff;
@@ -175,62 +85,165 @@ input {
   cursor: pointer;
 }
 
-.sheet-actions button:disabled {
+button:disabled {
   color: #999;
   cursor: default;
 }
 
-.capital-on {
-  color: #107c10;
+.quant-sheet {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
-.capital-test {
-  color: #0958d9;
+.quant-sheet th,
+.quant-sheet td {
+  min-height: 38px;
+  padding: 7px 8px;
+  border: 1px solid #d9d9d9;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
 }
 
-.capital-watch {
-  color: #b26a00;
+.quant-sheet th {
+  background: #f5f5f5;
+  color: #333;
+  font-weight: 700;
 }
 
-.capital-off {
+.quant-sheet th:nth-child(1),
+.quant-sheet td:nth-child(1) {
+  width: 72px;
+}
+
+.quant-sheet th:nth-child(2),
+.quant-sheet td:nth-child(2) {
+  width: 190px;
+}
+
+.quant-sheet th:nth-child(3),
+.quant-sheet td:nth-child(3) {
+  width: 150px;
+}
+
+.quant-sheet th:nth-child(4),
+.quant-sheet td:nth-child(4) {
+  width: 190px;
+}
+
+.quant-sheet th:nth-child(5),
+.quant-sheet td:nth-child(5) {
+  width: 190px;
+}
+
+.quant-sheet td strong,
+.quant-sheet td span {
+  display: block;
+}
+
+.quant-sheet td strong {
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quant-sheet td span {
   color: #666;
+  font-size: 12px;
 }
 
-.ai-risk {
-  margin-top: 3px;
-  font-weight: 600;
+.holding-row td {
+  background: #fffdf7;
 }
 
-.ai-risk-low {
+.capital-on,
+.holding-low,
+.profit-text {
   color: #107c10 !important;
 }
 
+.capital-test {
+  color: #0958d9 !important;
+}
+
+.capital-watch,
+.holding-medium,
+.holding-unknown,
 .ai-risk-medium,
 .ai-risk-unknown {
   color: #b26a00 !important;
 }
 
+.capital-off {
+  color: #666 !important;
+}
+
+.holding-high,
+.loss-text,
 .ai-risk-high {
-  color: #c62828 !important;
+  color: #c00000 !important;
 }
 
-.action-buy_probe {
-  color: #107c10;
+.ai-risk {
+  margin-top: 2px;
+  font-weight: 600;
 }
 
-.action-wait_confirmation,
-.action-wait_buy_zone,
-.action-wait_pullback {
-  color: #b26a00;
-}
-
-.action-no_buy,
-.action-monitor {
+.link-button {
+  height: auto;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #666;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
 }
 
-.sheet-error {
+.position-strip {
+  display: grid;
+  grid-template-columns: 76px 100px 110px 110px 150px minmax(180px, 1fr) 70px;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  border: 1px solid #d9d9d9;
+  padding: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.position-strip strong {
+  font-size: 12px;
+}
+
+.position-strip input {
+  width: 100%;
+  height: 26px;
+  padding: 2px 6px;
+  border: 1px solid #bfbfbf;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  outline: none;
+}
+
+.position-strip input:focus {
+  border-color: #217346;
+}
+
+.quant-error {
+  margin-bottom: 8px;
+  border: 1px solid #f0b8b8;
+  background: #fff7f7;
   color: #c00000;
+  padding: 7px 8px;
+  font-size: 12px;
 }
 
 .login-placeholder {
@@ -255,73 +268,22 @@ input {
     padding: 8px;
   }
 
-  .excel-sheet {
-    width: 1540px;
+  .quant-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
-}
 
+  .quant-sheet {
+    min-width: 940px;
+  }
 
-.position-entry-row input {
-  width: 100%;
-  height: 24px;
-  padding: 2px 6px;
-  border: 1px solid #bfbfbf;
-  border-radius: 0;
-  background: #fff;
-  color: #111;
-  outline: none;
-}
+  .position-strip {
+    grid-template-columns: 1fr 1fr;
+  }
 
-.position-entry-row input:focus {
-  border-color: #217346;
-}
-
-.holding-row td {
-  background: #fffdf7;
-}
-
-.subtle-header td {
-  color: #444;
-  font-weight: 700;
-}
-
-.loss-text {
-  color: #c00000 !important;
-}
-
-.profit-text {
-  color: #107c10 !important;
-}
-
-.holding-action {
-  font-weight: 700;
-}
-
-.holding-high {
-  color: #c00000;
-}
-
-.holding-medium,
-.holding-unknown {
-  color: #b26a00;
-}
-
-.holding-low {
-  color: #107c10;
-}
-
-.link-button {
-  margin-top: 3px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #666;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-}
-
-.link-button:disabled {
-  color: #aaa;
-  cursor: default;
+  .position-strip .note-input,
+  .position-strip button,
+  .position-strip strong {
+    grid-column: 1 / -1;
+  }
 }

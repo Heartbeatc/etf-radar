@@ -25,6 +25,57 @@ export interface Position extends PositionInput {
   updated_at: string;
 }
 
+export interface AccountInput {
+  cash_balance: number;
+  frozen_cash: number;
+  note: string;
+}
+
+export interface AccountState extends AccountInput {
+  updated_at: string;
+}
+
+export interface PortfolioPosition {
+  code: string;
+  name: string | null;
+  entry_price: number;
+  shares: number | null;
+  lots: number | null;
+  current_price: number | null;
+  cost_amount: number | null;
+  market_value: number | null;
+  unrealized_profit_amount: number | null;
+  unrealized_profit_pct: number | null;
+  position_weight_pct: number | null;
+  entry_date: string | null;
+  note: string;
+}
+
+export interface PortfolioRiskBudget {
+  available_cash: number | null;
+  operable_cash: number | null;
+  max_single_trade_cash: number | null;
+  cash_buffer: number | null;
+  risk_note: string;
+}
+
+export interface PortfolioSnapshotResponse {
+  generated_at: string;
+  account: AccountState | null;
+  positions: PortfolioPosition[];
+  total_assets: number | null;
+  cash_balance: number | null;
+  frozen_cash: number | null;
+  available_cash: number | null;
+  total_market_value: number | null;
+  total_cost_amount: number | null;
+  unrealized_profit_amount: number | null;
+  unrealized_profit_pct: number | null;
+  position_exposure_pct: number | null;
+  risk_budget: PortfolioRiskBudget;
+  warnings: string[];
+}
+
 export interface PositionExitInput {
   exit_price: number;
   shares: number | null;

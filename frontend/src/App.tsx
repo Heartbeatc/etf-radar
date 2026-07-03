@@ -6,7 +6,7 @@ import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import { QuantWorkbench } from './features/quant/QuantWorkbench';
 import { getErrorMessage } from './shared/errors';
 import { useProtectedQuery } from './shared/useProtectedQuery';
-import type { PositionExitInput } from './types';
+import type { AccountInput, PositionExitInput } from './types';
 
 const { Content } = Layout;
 
@@ -30,6 +30,13 @@ function App() {
     sessionToken,
     ({ signal }) => api.getTrades(sessionToken, signal),
     60_000
+  );
+
+  const portfolioQuery = useProtectedQuery(
+    ['portfolio', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getPortfolio(sessionToken, signal),
+    30_000
   );
 
   const unauthorized = decisionQuery.error instanceof ApiError && decisionQuery.error.status === 401;
@@ -68,6 +75,15 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
+  const saveAccountMutation = useMutation({
+    mutationFn: (input: AccountInput) => api.upsertAccount(sessionToken, input),
+    onSuccess: () => {
+      message.success('账户资金已保存');
+      queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
   const savePositionMutation = useMutation({
     mutationFn: ({ code, input }: { code: string; input: { entry_price: number; shares: number | null; entry_date: string | null; note: string } }) =>
       api.upsertPosition(sessionToken, code, input),
@@ -75,6 +91,7 @@ function App() {
       message.success('持仓已保存');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -85,6 +102,7 @@ function App() {
       message.success(`已记录卖出：${record.code} ${record.realized_profit_pct.toFixed(2)}%`);
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -95,6 +113,7 @@ function App() {
       message.success('持仓已删除');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -127,16 +146,19 @@ function App() {
           <QuantWorkbench
             decision={decisionQuery.data}
             tradeJournal={tradesQuery.data}
+            portfolio={portfolioQuery.data}
             onRefresh={() => forceRefreshMutation.mutate()}
             refreshing={forceRefreshMutation.isPending || decisionQuery.isFetching}
             onLogout={logout}
+            onSaveAccount={(input) => saveAccountMutation.mutate(input)}
             onSavePosition={(code, input) => savePositionMutation.mutate({ code, input })}
             onClosePosition={(code, input) => closePositionMutation.mutate({ code, input })}
             onDeletePosition={(code) => deletePositionMutation.mutate(code)}
+            savingAccount={saveAccountMutation.isPending}
             savingPosition={savePositionMutation.isPending}
             closingPosition={closePositionMutation.isPending}
             deletingPosition={deletePositionMutation.isPending}
-            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : null}
+            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : portfolioQuery.error ? getErrorMessage(portfolioQuery.error) : null}
           />
         )}
       </Content>

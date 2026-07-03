@@ -6,6 +6,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from app.core.config import Settings
 from app.core.runtime import Runtime
 from app.domain.models import (
+    AccountInput,
+    AccountState,
     AiControlRequest,
     ActionDecisionResponse,
     AiStatus,
@@ -22,6 +24,7 @@ from app.domain.models import (
     LatestResponse,
     MarketFlowResponse,
     PoolRecommendationResponse,
+    PortfolioSnapshotResponse,
     PythonQuantStackReport,
     QuantDecisionResponse,
     QuantAlgorithmReport,
@@ -47,6 +50,7 @@ from app.services.action_decision import build_action_decision_report
 from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
 from app.services.pool_recommendation import build_pool_recommendation_report
+from app.services.portfolio import build_portfolio_snapshot
 from app.services.python_quant_stack import build_python_quant_stack_report
 from app.services.quant_decision import build_quant_decision_report
 from app.services.quant_framework import build_quant_framework_report
@@ -335,6 +339,24 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     @app.post("/api/v1/refresh-history", dependencies=PROTECTED)
     async def refresh_history() -> dict:
         return await runtime.refresh_history()
+
+    @app.get("/api/v1/account", response_model=AccountState | None, dependencies=PROTECTED)
+    async def account() -> AccountState | None:
+        return runtime.store.account_state()
+
+    @app.put("/api/v1/account", response_model=AccountState, dependencies=PROTECTED)
+    async def upsert_account(account_input: AccountInput) -> AccountState:
+        if account_input.frozen_cash > account_input.cash_balance:
+            raise HTTPException(status_code=400, detail="frozen_cash cannot exceed cash_balance")
+        return runtime.store.upsert_account(account_input)
+
+    @app.get("/api/v1/portfolio", response_model=PortfolioSnapshotResponse, dependencies=PROTECTED)
+    async def portfolio() -> PortfolioSnapshotResponse:
+        return build_portfolio_snapshot(
+            account=runtime.store.account_state(),
+            positions=runtime.store.positions(),
+            snapshots=runtime.store.latest_snapshots(),
+        )
 
     @app.get("/api/v1/positions", response_model=list[Position], dependencies=PROTECTED)
     async def positions() -> list[Position]:

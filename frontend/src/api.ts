@@ -1,4 +1,6 @@
 import type {
+  AccountInput,
+  AccountState,
   ActionDecisionResponse,
   AiStatus,
   AiSummaryItem,
@@ -11,6 +13,7 @@ import type {
   LatestResponse,
   MarketFlowResponse,
   PoolRecommendationResponse,
+  PortfolioSnapshotResponse,
   Position,
   PositionExitInput,
   PositionInput,
@@ -120,6 +123,10 @@ export const api = {
     requestJson<QuantValidationReport>('/api/v1/quant-validation', { token, signal }),
   getActionDecisions: (token: string, signal?: AbortSignal) =>
     requestJson<ActionDecisionResponse>('/api/v1/action-decisions', { token, signal }),
+  getAccount: (token: string, signal?: AbortSignal) => requestJson<AccountState | null>('/api/v1/account', { token, signal }),
+  upsertAccount: (token: string, input: AccountInput) =>
+    requestJson<AccountState>('/api/v1/account', { method: 'PUT', token, body: input }),
+  getPortfolio: (token: string, signal?: AbortSignal) => requestJson<PortfolioSnapshotResponse>('/api/v1/portfolio', { token, signal }),
   getPositions: (token: string, signal?: AbortSignal) => requestJson<Position[]>('/api/v1/positions', { token, signal }),
   upsertPosition: (token: string, code: string, input: PositionInput) =>
     requestJson<Position>(`/api/v1/positions/${code}`, { method: 'PUT', token, body: input }),

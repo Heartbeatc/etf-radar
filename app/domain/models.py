@@ -118,6 +118,57 @@ class TradeJournalResponse(BaseModel):
     records: list[TradeRecord]
 
 
+class AccountInput(BaseModel):
+    cash_balance: float = Field(ge=0)
+    frozen_cash: float = Field(default=0, ge=0)
+    note: str = ""
+
+
+class AccountState(AccountInput):
+    updated_at: datetime
+
+
+class PortfolioPosition(BaseModel):
+    code: str
+    name: str | None = None
+    entry_price: float
+    shares: float | None = None
+    lots: float | None = None
+    current_price: float | None = None
+    cost_amount: float | None = None
+    market_value: float | None = None
+    unrealized_profit_amount: float | None = None
+    unrealized_profit_pct: float | None = None
+    position_weight_pct: float | None = None
+    entry_date: str | None = None
+    note: str = ""
+
+
+class PortfolioRiskBudget(BaseModel):
+    available_cash: float | None = None
+    operable_cash: float | None = None
+    max_single_trade_cash: float | None = None
+    cash_buffer: float | None = None
+    risk_note: str
+
+
+class PortfolioSnapshotResponse(BaseModel):
+    generated_at: datetime
+    account: AccountState | None = None
+    positions: list[PortfolioPosition]
+    total_assets: float | None = None
+    cash_balance: float | None = None
+    frozen_cash: float | None = None
+    available_cash: float | None = None
+    total_market_value: float | None = None
+    total_cost_amount: float | None = None
+    unrealized_profit_amount: float | None = None
+    unrealized_profit_pct: float | None = None
+    position_exposure_pct: float | None = None
+    risk_budget: PortfolioRiskBudget
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TradePlan(BaseModel):
     code: str
     name: str

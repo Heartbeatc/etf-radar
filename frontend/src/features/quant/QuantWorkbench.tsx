@@ -1,16 +1,19 @@
-import { useState } from 'react';
-import type { PositionExitInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
+import { useEffect, useState } from 'react';
+import type { AccountInput, PortfolioSnapshotResponse, PositionExitInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
   decision?: QuantDecisionResponse;
   tradeJournal?: TradeJournalResponse;
+  portfolio?: PortfolioSnapshotResponse;
   onRefresh: () => void;
   refreshing: boolean;
   onLogout: () => void;
+  onSaveAccount: (input: AccountInput) => void;
   onSavePosition: (code: string, input: PositionInput) => void;
   onClosePosition: (code: string, input: PositionExitInput) => void;
   onDeletePosition: (code: string) => void;
+  savingAccount: boolean;
   savingPosition: boolean;
   closingPosition: boolean;
   deletingPosition: boolean;
@@ -20,12 +23,15 @@ interface QuantWorkbenchProps {
 export function QuantWorkbench({
   decision,
   tradeJournal,
+  portfolio,
   onRefresh,
   refreshing,
   onLogout,
+  onSaveAccount,
   onSavePosition,
   onClosePosition,
   onDeletePosition,
+  savingAccount,
   savingPosition,
   closingPosition,
   deletingPosition,
@@ -34,11 +40,39 @@ export function QuantWorkbench({
   const direction = decision?.direction;
   const holdings = decision?.holdings ?? [];
   const candidates = pickStocks(decision?.bottom_candidates ?? []);
+  const [cashBalance, setCashBalance] = useState('');
+  const [frozenCash, setFrozenCash] = useState('');
+  const [accountNote, setAccountNote] = useState('');
   const [code, setCode] = useState('');
   const [entryPrice, setEntryPrice] = useState('');
   const [shares, setShares] = useState('');
   const [entryDate, setEntryDate] = useState(todayText());
   const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (!portfolio?.account) return;
+    setCashBalance(String(portfolio.account.cash_balance));
+    setFrozenCash(String(portfolio.account.frozen_cash));
+    setAccountNote(portfolio.account.note ?? '');
+  }, [portfolio?.account?.updated_at]);
+
+  const saveAccount = () => {
+    const parsedCash = Number(cashBalance);
+    const parsedFrozen = frozenCash.trim() ? Number(frozenCash) : 0;
+    if (!Number.isFinite(parsedCash) || parsedCash < 0) {
+      window.alert('请输入有效现金余额');
+      return;
+    }
+    if (!Number.isFinite(parsedFrozen) || parsedFrozen < 0) {
+      window.alert('冻结资金不能为负数');
+      return;
+    }
+    if (parsedFrozen > parsedCash) {
+      window.alert('冻结资金不能大于现金余额');
+      return;
+    }
+    onSaveAccount({ cash_balance: parsedCash, frozen_cash: parsedFrozen, note: accountNote.trim() });
+  };
 
   const save = () => {
     const normalized = code.trim();
@@ -92,6 +126,7 @@ export function QuantWorkbench({
         </thead>
         <tbody>
           <MarketRow decision={decision} direction={direction} />
+          <PortfolioRow portfolio={portfolio} />
           <TradeSummaryRow journal={tradeJournal} />
           {holdings.map((holding) => (
             <HoldingRow
@@ -109,6 +144,14 @@ export function QuantWorkbench({
           {holdings.length === 0 && candidates.length === 0 ? <EmptyRow /> : null}
         </tbody>
       </table>
+
+      <section className="position-strip account-strip" aria-label="录入账户资金">
+        <strong>账户资金</strong>
+        <input value={cashBalance} onChange={(event) => setCashBalance(event.target.value)} placeholder="现金余额" inputMode="decimal" />
+        <input value={frozenCash} onChange={(event) => setFrozenCash(event.target.value)} placeholder="冻结资金" inputMode="decimal" />
+        <input className="note-input" value={accountNote} onChange={(event) => setAccountNote(event.target.value)} placeholder="备注可空" />
+        <button type="button" onClick={saveAccount} disabled={savingAccount}>{savingAccount ? '保存中' : '保存账户'}</button>
+      </section>
 
       <section className="position-strip" aria-label="录入持仓">
         <strong>录入持仓</strong>
@@ -145,6 +188,32 @@ function MarketRow({ decision, direction }: { decision?: QuantDecisionResponse; 
         <span>{decision?.should_poll_realtime ? '盘中按信号更新' : '闭市不产生新买点'}</span>
       </td>
       <td>{shortText(decision?.conclusion ?? decision?.market_note ?? '等待数据', 46)}</td>
+    </tr>
+  );
+}
+
+function PortfolioRow({ portfolio }: { portfolio?: PortfolioSnapshotResponse }) {
+  const warning = portfolio?.warnings?.[0];
+  return (
+    <tr className="portfolio-row">
+      <td>账户</td>
+      <td>
+        <strong>总资产 {moneyText(portfolio?.total_assets)}</strong>
+        <span>持仓 {portfolio?.positions.length ?? 0} 个 / 市值 {moneyText(portfolio?.total_market_value)}</span>
+      </td>
+      <td>
+        <strong>仓位 {pctText(portfolio?.position_exposure_pct)}</strong>
+        <span>浮盈亏 {amountText(portfolio?.unrealized_profit_amount)} / {pctText(portfolio?.unrealized_profit_pct)}</span>
+      </td>
+      <td>
+        <strong>可用 {moneyText(portfolio?.available_cash)}</strong>
+        <span>现金 {moneyText(portfolio?.cash_balance)} / 冻结 {moneyText(portfolio?.frozen_cash)}</span>
+      </td>
+      <td>
+        <strong>可操作 {moneyText(portfolio?.risk_budget.operable_cash)}</strong>
+        <span>单票上限 {moneyText(portfolio?.risk_budget.max_single_trade_cash)}</span>
+      </td>
+      <td>{shortText(warning ?? portfolio?.risk_budget.risk_note ?? '账户资金未录入', 54)}</td>
     </tr>
   );
 }
@@ -241,7 +310,7 @@ function HoldingRow({
       <td>持仓</td>
       <td>
         <strong>{item.code} {item.name}</strong>
-        <span>成本 {priceText(item.entry_price)} / 买入 {item.entry_date ?? '-'}</span>
+        <span>{sharesText(item.shares)} / 成本 {priceText(item.entry_price)} / 买入 {item.entry_date ?? '-'}</span>
       </td>
       <td>
         <strong className={`holding-action holding-${item.risk_level}`}>{item.action_label}</strong>
@@ -249,7 +318,7 @@ function HoldingRow({
       </td>
       <td>
         <strong>现价 {priceText(item.current_price)}</strong>
-        <span>弱防 {priceText(item.weak_exit_price)} / 止损 {priceText(item.stop_price)}</span>
+        <span>市值 {moneyText(item.market_value)} / 弱防 {priceText(item.weak_exit_price)} / 止损 {priceText(item.stop_price)}</span>
       </td>
       <td>
         <strong>{item.can_add_position ? '可小幅滚动' : '不补仓'}</strong>
@@ -423,6 +492,17 @@ function amountText(value: number | null | undefined): string {
   if (value == null) return '-';
   const sign = value > 0 ? '+' : '';
   return `${sign}${value.toFixed(2)}`;
+}
+
+function moneyText(value: number | null | undefined): string {
+  if (value == null) return '-';
+  if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(2)}万`;
+  return value.toFixed(2);
+}
+
+function sharesText(value: number | null | undefined): string {
+  if (value == null) return '数量未录';
+  return `${value.toFixed(0)}股/${(value / 100).toFixed(1)}手`;
 }
 
 function rangeText(low: number | null | undefined, high: number | null | undefined): string {

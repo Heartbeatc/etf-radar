@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Any
 
 from app.core.market import MARKET_TZ
-from app.domain.models import AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionExitInput, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan, TradeRecord
+from app.domain.models import AccountInput, AccountState, AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionExitInput, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan, TradeRecord
 
 
 class Store:
@@ -66,6 +66,26 @@ class Store:
                     note text not null default '',
                     updated_at text not null
                 );
+
+                create table if not exists account_state (
+                    id integer primary key check(id = 1),
+                    cash_balance real not null default 0,
+                    frozen_cash real not null default 0,
+                    note text not null default '',
+                    updated_at text not null
+                );
+
+                create table if not exists cash_ledger (
+                    id integer primary key autoincrement,
+                    event_at text not null,
+                    event_type text not null,
+                    cash_delta real not null,
+                    cash_balance_after real not null,
+                    ref_code text,
+                    note text not null default '',
+                    payload text not null
+                );
+                create index if not exists idx_cash_ledger_time on cash_ledger(event_at desc);
 
                 create table if not exists closed_trades (
                     id integer primary key autoincrement,
@@ -393,6 +413,81 @@ class Store:
             return []
         return json.loads(row["payload"])
 
+    def account_state(self) -> AccountState | None:
+        with self._connect() as conn:
+            row = conn.execute("select * from account_state where id = 1").fetchone()
+        if row is None:
+            return None
+        return AccountState(
+            cash_balance=row["cash_balance"],
+            frozen_cash=row["frozen_cash"],
+            note=row["note"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def upsert_account(self, account: AccountInput) -> AccountState:
+        updated_at = datetime.now(timezone.utc)
+        old_account = self.account_state()
+        cash_delta = account.cash_balance - (old_account.cash_balance if old_account else 0)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into account_state(id, cash_balance, frozen_cash, note, updated_at) values (1, ?, ?, ?, ?)
+                on conflict(id) do update set
+                    cash_balance = excluded.cash_balance,
+                    frozen_cash = excluded.frozen_cash,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (account.cash_balance, account.frozen_cash, account.note.strip(), updated_at.isoformat()),
+            )
+            conn.execute(
+                """
+                insert into cash_ledger(event_at, event_type, cash_delta, cash_balance_after, ref_code, note, payload)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    updated_at.isoformat(),
+                    "manual_set",
+                    cash_delta,
+                    account.cash_balance,
+                    None,
+                    account.note.strip(),
+                    account.model_dump_json(),
+                ),
+            )
+        return AccountState(updated_at=updated_at, cash_balance=account.cash_balance, frozen_cash=account.frozen_cash, note=account.note.strip())
+
+    def adjust_account_cash(self, cash_delta: float, *, ref_code: str | None = None, event_type: str = "manual_adjust", note: str = "", payload: dict[str, Any] | None = None) -> AccountState | None:
+        current = self.account_state()
+        if current is None:
+            return None
+        updated_at = datetime.now(timezone.utc)
+        new_cash = current.cash_balance + cash_delta
+        if new_cash < -0.000001:
+            raise ValueError("cash balance would become negative")
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "update account_state set cash_balance = ?, updated_at = ? where id = 1",
+                (max(0, new_cash), updated_at.isoformat()),
+            )
+            conn.execute(
+                """
+                insert into cash_ledger(event_at, event_type, cash_delta, cash_balance_after, ref_code, note, payload)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    updated_at.isoformat(),
+                    event_type,
+                    cash_delta,
+                    max(0, new_cash),
+                    ref_code,
+                    note,
+                    json.dumps(payload or {}, ensure_ascii=False),
+                ),
+            )
+        return AccountState(cash_balance=max(0, new_cash), frozen_cash=current.frozen_cash, note=current.note, updated_at=updated_at)
+
     def upsert_position(self, code: str, position: PositionInput) -> Position:
         updated_at = datetime.now(timezone.utc)
         with self._lock, self._connect() as conn:
@@ -477,6 +572,31 @@ class Store:
                     "update positions set shares = ?, note = ?, updated_at = ? where code = ?",
                     (remaining_shares, position.note, closed_at.isoformat(), code),
                 )
+
+            if close_shares is not None:
+                proceeds = exit_input.exit_price * close_shares - exit_input.fee
+                account_row = conn.execute("select cash_balance from account_state where id = 1").fetchone()
+                if account_row is not None:
+                    cash_after = account_row["cash_balance"] + proceeds
+                    conn.execute(
+                        "update account_state set cash_balance = ?, updated_at = ? where id = 1",
+                        (cash_after, closed_at.isoformat()),
+                    )
+                    conn.execute(
+                        """
+                        insert into cash_ledger(event_at, event_type, cash_delta, cash_balance_after, ref_code, note, payload)
+                        values (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            closed_at.isoformat(),
+                            "sell_credit",
+                            proceeds,
+                            cash_after,
+                            code,
+                            exit_input.reason.strip(),
+                            json.dumps({"closed_trade_id": int(cursor.lastrowid), "exit": exit_input.model_dump(mode="json")}, ensure_ascii=False),
+                        ),
+                    )
 
             return TradeRecord(
                 id=int(cursor.lastrowid),

@@ -12,6 +12,7 @@ import type {
   MarketFlowResponse,
   PoolRecommendationResponse,
   Position,
+  PositionExitInput,
   PositionInput,
   PythonQuantStackReport,
   QuantDecisionResponse,
@@ -21,6 +22,8 @@ import type {
   QuantSelfAuditReport,
   QuantValidationReport,
   RiskResponse,
+  TradeJournalResponse,
+  TradeRecord,
   WebLoginResponse,
   WebSessionInfo
 } from './types';
@@ -120,6 +123,9 @@ export const api = {
   getPositions: (token: string, signal?: AbortSignal) => requestJson<Position[]>('/api/v1/positions', { token, signal }),
   upsertPosition: (token: string, code: string, input: PositionInput) =>
     requestJson<Position>(`/api/v1/positions/${code}`, { method: 'PUT', token, body: input }),
+  closePosition: (token: string, code: string, input: PositionExitInput) =>
+    requestJson<TradeRecord>(`/api/v1/positions/${code}/close`, { method: 'POST', token, body: input }),
+  getTrades: (token: string, signal?: AbortSignal) => requestJson<TradeJournalResponse>('/api/v1/trades', { token, signal }),
   deletePosition: (token: string, code: string) => requestJson<{ deleted: boolean }>(`/api/v1/positions/${code}`, { method: 'DELETE', token }),
   getRisk: (token: string, signal?: AbortSignal) => requestJson<RiskResponse>('/api/v1/risk', { token, signal }),
   getDataQuality: (token: string, signal?: AbortSignal) =>

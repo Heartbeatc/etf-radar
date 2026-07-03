@@ -25,6 +25,50 @@ export interface Position extends PositionInput {
   updated_at: string;
 }
 
+export interface PositionExitInput {
+  exit_price: number;
+  shares: number | null;
+  exit_date: string | null;
+  reason: string;
+  note: string;
+  fee: number;
+}
+
+export interface TradeRecord {
+  id: number;
+  code: string;
+  entry_price: number;
+  exit_price: number;
+  shares: number | null;
+  entry_date: string | null;
+  exit_date: string;
+  reason: string;
+  note: string;
+  fee: number;
+  realized_profit_pct: number;
+  realized_profit_amount: number | null;
+  holding_days: number | null;
+  closed_at: string;
+  remaining_shares: number | null;
+  source: string;
+}
+
+export interface TradeJournalSummary {
+  generated_at: string;
+  closed_trade_count: number;
+  open_position_count: number;
+  win_rate_pct: number | null;
+  realized_profit_amount: number | null;
+  average_return_pct: number | null;
+  best_return_pct: number | null;
+  worst_return_pct: number | null;
+}
+
+export interface TradeJournalResponse {
+  summary: TradeJournalSummary;
+  records: TradeRecord[];
+}
+
 export interface BuyZoneReference {
   vwap: number | null;
   ma5: number | null;

@@ -6,6 +6,7 @@ import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import { QuantWorkbench } from './features/quant/QuantWorkbench';
 import { getErrorMessage } from './shared/errors';
 import { useProtectedQuery } from './shared/useProtectedQuery';
+import type { PositionExitInput } from './types';
 
 const { Content } = Layout;
 
@@ -22,6 +23,13 @@ function App() {
     sessionToken,
     ({ signal }) => api.getQuantDecision(sessionToken, signal),
     30_000
+  );
+
+  const tradesQuery = useProtectedQuery(
+    ['trade-journal', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getTrades(sessionToken, signal),
+    60_000
   );
 
   const unauthorized = decisionQuery.error instanceof ApiError && decisionQuery.error.status === 401;
@@ -66,6 +74,17 @@ function App() {
     onSuccess: () => {
       message.success('持仓已保存');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
+    },
+    onError: (error) => message.error(getErrorMessage(error))
+  });
+
+  const closePositionMutation = useMutation({
+    mutationFn: ({ code, input }: { code: string; input: PositionExitInput }) => api.closePosition(sessionToken, code, input),
+    onSuccess: (record) => {
+      message.success(`已记录卖出：${record.code} ${record.realized_profit_pct.toFixed(2)}%`);
+      queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -75,6 +94,7 @@ function App() {
     onSuccess: () => {
       message.success('持仓已删除');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
     },
     onError: (error) => message.error(getErrorMessage(error))
   });
@@ -106,14 +126,17 @@ function App() {
         ) : (
           <QuantWorkbench
             decision={decisionQuery.data}
+            tradeJournal={tradesQuery.data}
             onRefresh={() => forceRefreshMutation.mutate()}
             refreshing={forceRefreshMutation.isPending || decisionQuery.isFetching}
             onLogout={logout}
             onSavePosition={(code, input) => savePositionMutation.mutate({ code, input })}
+            onClosePosition={(code, input) => closePositionMutation.mutate({ code, input })}
             onDeletePosition={(code) => deletePositionMutation.mutate(code)}
             savingPosition={savePositionMutation.isPending}
+            closingPosition={closePositionMutation.isPending}
             deletingPosition={deletePositionMutation.isPending}
-            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : null}
+            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : null}
           />
         )}
       </Content>

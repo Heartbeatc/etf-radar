@@ -74,6 +74,50 @@ class Position(PositionInput):
     updated_at: datetime
 
 
+class PositionExitInput(BaseModel):
+    exit_price: float = Field(gt=0)
+    shares: float | None = Field(default=None, gt=0)
+    exit_date: str | None = None
+    reason: str = ""
+    note: str = ""
+    fee: float = Field(default=0, ge=0)
+
+
+class TradeRecord(BaseModel):
+    id: int
+    code: str
+    entry_price: float
+    exit_price: float
+    shares: float | None = None
+    entry_date: str | None = None
+    exit_date: str
+    reason: str = ""
+    note: str = ""
+    fee: float = 0
+    realized_profit_pct: float
+    realized_profit_amount: float | None = None
+    holding_days: int | None = None
+    closed_at: datetime
+    remaining_shares: float | None = None
+    source: str = "manual"
+
+
+class TradeJournalSummary(BaseModel):
+    generated_at: datetime
+    closed_trade_count: int
+    open_position_count: int
+    win_rate_pct: float | None = None
+    realized_profit_amount: float | None = None
+    average_return_pct: float | None = None
+    best_return_pct: float | None = None
+    worst_return_pct: float | None = None
+
+
+class TradeJournalResponse(BaseModel):
+    summary: TradeJournalSummary
+    records: list[TradeRecord]
+
+
 class TradePlan(BaseModel):
     code: str
     name: str

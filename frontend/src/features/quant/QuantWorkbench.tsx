@@ -1,27 +1,33 @@
 import { useState } from 'react';
-import type { PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision } from '../../types';
+import type { PositionExitInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
   decision?: QuantDecisionResponse;
+  tradeJournal?: TradeJournalResponse;
   onRefresh: () => void;
   refreshing: boolean;
   onLogout: () => void;
   onSavePosition: (code: string, input: PositionInput) => void;
+  onClosePosition: (code: string, input: PositionExitInput) => void;
   onDeletePosition: (code: string) => void;
   savingPosition: boolean;
+  closingPosition: boolean;
   deletingPosition: boolean;
   errorMessage: string | null;
 }
 
 export function QuantWorkbench({
   decision,
+  tradeJournal,
   onRefresh,
   refreshing,
   onLogout,
   onSavePosition,
+  onClosePosition,
   onDeletePosition,
   savingPosition,
+  closingPosition,
   deletingPosition,
   errorMessage
 }: QuantWorkbenchProps) {
@@ -86,8 +92,16 @@ export function QuantWorkbench({
         </thead>
         <tbody>
           <MarketRow decision={decision} direction={direction} />
+          <TradeSummaryRow journal={tradeJournal} />
           {holdings.map((holding) => (
-            <HoldingRow key={holding.code} item={holding} onDelete={onDeletePosition} deleting={deletingPosition} />
+            <HoldingRow
+              key={holding.code}
+              item={holding}
+              onClose={onClosePosition}
+              onDelete={onDeletePosition}
+              closing={closingPosition}
+              deleting={deletingPosition}
+            />
           ))}
           {holdings.length === 0 && candidates.map((stock) => (
             <CandidateRow key={stock.code} item={stock} />
@@ -135,7 +149,93 @@ function MarketRow({ decision, direction }: { decision?: QuantDecisionResponse; 
   );
 }
 
-function HoldingRow({ item, onDelete, deleting }: { item: QuantHoldingDecision; onDelete: (code: string) => void; deleting: boolean }) {
+function TradeSummaryRow({ journal }: { journal?: TradeJournalResponse }) {
+  const summary = journal?.summary;
+  return (
+    <tr className="journal-row">
+      <td>账本</td>
+      <td>
+        <strong>已平仓 {summary?.closed_trade_count ?? 0} 笔</strong>
+        <span>当前持仓 {summary?.open_position_count ?? 0} 个</span>
+      </td>
+      <td>
+        <strong>胜率 {pctText(summary?.win_rate_pct)}</strong>
+        <span>均值 {pctText(summary?.average_return_pct)}</span>
+      </td>
+      <td>
+        <strong>已实现 {amountText(summary?.realized_profit_amount)}</strong>
+        <span>按你录入的成交价计算</span>
+      </td>
+      <td>
+        <strong>最好 {pctText(summary?.best_return_pct)}</strong>
+        <span>最差 {pctText(summary?.worst_return_pct)}</span>
+      </td>
+      <td>卖出后必须入账，否则系统无法计算真实收益、胜率和策略质量。</td>
+    </tr>
+  );
+}
+
+function HoldingRow({
+  item,
+  onClose,
+  onDelete,
+  closing,
+  deleting
+}: {
+  item: QuantHoldingDecision;
+  onClose: (code: string, input: PositionExitInput) => void;
+  onDelete: (code: string) => void;
+  closing: boolean;
+  deleting: boolean;
+}) {
+  const close = () => {
+    const priceText = window.prompt(`卖出价格：${item.code} ${item.name}`, item.current_price ? item.current_price.toFixed(2) : '');
+    if (priceText === null) return;
+    const exitPrice = Number(priceText);
+    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
+      window.alert('请输入有效卖出价格');
+      return;
+    }
+
+    const sharesText = window.prompt('卖出数量，留空表示全部平仓', item.shares ? String(item.shares) : '');
+    if (sharesText === null) return;
+    const parsedShares = sharesText.trim() ? Number(sharesText) : null;
+    if (parsedShares !== null && (!Number.isFinite(parsedShares) || parsedShares <= 0)) {
+      window.alert('卖出数量必须大于0，或留空');
+      return;
+    }
+
+    const exitDate = window.prompt('卖出日期', todayText()) ?? todayText();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(exitDate)) {
+      window.alert('卖出日期格式必须是 YYYY-MM-DD');
+      return;
+    }
+
+    const feeText = window.prompt('手续费/税费，留空为0', '0');
+    if (feeText === null) return;
+    const fee = feeText.trim() ? Number(feeText) : 0;
+    if (!Number.isFinite(fee) || fee < 0) {
+      window.alert('费用不能为负数');
+      return;
+    }
+
+    const reason = window.prompt('卖出原因：止损 / 止盈 / 手动 / 风控', item.action_label) ?? '';
+    onClose(item.code, {
+      exit_price: exitPrice,
+      shares: parsedShares,
+      exit_date: exitDate,
+      reason: reason.trim(),
+      note: item.exit_plan,
+      fee
+    });
+  };
+
+  const deleteWithoutJournal = () => {
+    if (window.confirm('只在录错持仓时删除。真实卖出请用“卖出记录”，否则收益不会入账。')) {
+      onDelete(item.code);
+    }
+  };
+
   return (
     <tr className="holding-row">
       <td>持仓</td>
@@ -159,7 +259,10 @@ function HoldingRow({ item, onDelete, deleting }: { item: QuantHoldingDecision; 
         <strong className={pnlClass(item.floating_profit_pct)}>浮盈亏 {pctText(item.floating_profit_pct)}</strong>
         <span>{shortText(item.exit_plan, 42)}</span>
         {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI {shortText(item.ai_risk_review.conclusion, 34)}</span> : null}
-        <button type="button" className="link-button" onClick={() => onDelete(item.code)} disabled={deleting}>删除</button>
+        <span className="row-actions">
+          <button type="button" className="link-button primary-link" onClick={close} disabled={closing}>卖出记录</button>
+          <button type="button" className="link-button" onClick={deleteWithoutJournal} disabled={deleting}>删除不记账</button>
+        </span>
       </td>
     </tr>
   );
@@ -314,6 +417,12 @@ function priceText(value: number | null | undefined): string {
 
 function pctText(value: number | null | undefined): string {
   return value == null ? '-' : `${value.toFixed(2)}%`;
+}
+
+function amountText(value: number | null | undefined): string {
+  if (value == null) return '-';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}`;
 }
 
 function rangeText(low: number | null | undefined, high: number | null | undefined): string {

@@ -30,9 +30,13 @@ from app.domain.models import (
     QuantSelfAuditReport,
     QuantValidationReport,
     Position,
+    PositionExitInput,
     PositionInput,
     SignalRecord,
     RiskReport,
+    TradeJournalResponse,
+    TradeJournalSummary,
+    TradeRecord,
     SourceStatus,
     TradePlan,
     WebLoginRequest,
@@ -54,6 +58,23 @@ from app.services.risk import build_risk_report
 from app.api.security import AuthPrincipal, authenticate_web_user, require_api_token
 
 PROTECTED = [Depends(require_api_token)]
+
+
+def build_trade_journal_response(records: list[TradeRecord], open_position_count: int) -> TradeJournalResponse:
+    returns = [record.realized_profit_pct for record in records]
+    amounts = [record.realized_profit_amount for record in records if record.realized_profit_amount is not None]
+    winners = [value for value in returns if value > 0]
+    summary = TradeJournalSummary(
+        generated_at=datetime.now(timezone.utc),
+        closed_trade_count=len(records),
+        open_position_count=open_position_count,
+        win_rate_pct=(len(winners) / len(returns) * 100) if returns else None,
+        realized_profit_amount=sum(amounts) if amounts else None,
+        average_return_pct=(sum(returns) / len(returns)) if returns else None,
+        best_return_pct=max(returns) if returns else None,
+        worst_return_pct=min(returns) if returns else None,
+    )
+    return TradeJournalResponse(summary=summary, records=records)
 
 
 def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
@@ -325,6 +346,26 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         if not normalized.isdigit() or len(normalized) != 6:
             raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
         return runtime.store.upsert_position(normalized, position)
+
+    @app.post("/api/v1/positions/{code}/close", response_model=TradeRecord, dependencies=PROTECTED)
+    async def close_position(code: str, exit_input: PositionExitInput) -> TradeRecord:
+        normalized = code.strip()
+        if not normalized.isdigit() or len(normalized) != 6:
+            raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
+        try:
+            return runtime.store.close_position(normalized, exit_input)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="position not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.get("/api/v1/trades", response_model=TradeJournalResponse, dependencies=PROTECTED)
+    async def trades(code: str | None = None, limit: int = Query(default=200, ge=1, le=1000)) -> TradeJournalResponse:
+        normalized = code.strip() if code else None
+        if normalized and (not normalized.isdigit() or len(normalized) != 6):
+            raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
+        records = runtime.store.closed_trades(code=normalized, limit=limit)
+        return build_trade_journal_response(records, open_position_count=len(runtime.store.positions()))
 
     @app.delete("/api/v1/positions/{code}", dependencies=PROTECTED)
     async def delete_position(code: str) -> dict:

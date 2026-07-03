@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
+from app.core.market import MARKET_TZ
+from app.domain.models import AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionExitInput, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan, TradeRecord
 
 
 class Store:
@@ -65,6 +66,28 @@ class Store:
                     note text not null default '',
                     updated_at text not null
                 );
+
+                create table if not exists closed_trades (
+                    id integer primary key autoincrement,
+                    code text not null,
+                    entry_price real not null,
+                    exit_price real not null,
+                    shares real,
+                    entry_date text,
+                    exit_date text not null,
+                    reason text not null default '',
+                    note text not null default '',
+                    fee real not null default 0,
+                    realized_profit_pct real not null,
+                    realized_profit_amount real,
+                    holding_days integer,
+                    closed_at text not null,
+                    remaining_shares real,
+                    source text not null default 'manual',
+                    payload text not null
+                );
+                create index if not exists idx_closed_trades_code_time on closed_trades(code, closed_at desc);
+                create index if not exists idx_closed_trades_time on closed_trades(closed_at desc);
 
                 create table if not exists signal_history (
                     id integer primary key autoincrement,
@@ -387,6 +410,106 @@ class Store:
             )
         return Position(code=code, updated_at=updated_at, **position.model_dump())
 
+    def close_position(self, code: str, exit_input: PositionExitInput) -> TradeRecord:
+        closed_at = datetime.now(timezone.utc)
+        exit_date = exit_input.exit_date or datetime.now(MARKET_TZ).date().isoformat()
+        try:
+            date.fromisoformat(exit_date)
+        except ValueError:
+            raise ValueError("exit_date must be YYYY-MM-DD")
+        with self._lock, self._connect() as conn:
+            row = conn.execute("select * from positions where code = ?", (code,)).fetchone()
+            if row is None:
+                raise KeyError(code)
+
+            position = self._position_from_row(row)
+            close_shares = exit_input.shares if exit_input.shares is not None else position.shares
+            remaining_shares = self._remaining_shares(position.shares, close_shares)
+            if remaining_shares is not None and remaining_shares < -0.000001:
+                raise ValueError("sell shares exceed open position shares")
+            if remaining_shares is not None and remaining_shares <= 0.000001:
+                remaining_shares = None
+
+            realized_amount = None
+            realized_pct = (exit_input.exit_price - position.entry_price) / position.entry_price * 100
+            if close_shares is not None:
+                realized_amount = (exit_input.exit_price - position.entry_price) * close_shares - exit_input.fee
+                cost_amount = position.entry_price * close_shares
+                if cost_amount > 0:
+                    realized_pct = realized_amount / cost_amount * 100
+
+            holding_days = self._holding_days(position.entry_date, exit_date)
+            payload = {
+                "position": position.model_dump(mode="json"),
+                "exit": exit_input.model_dump(mode="json"),
+            }
+            cursor = conn.execute(
+                """
+                insert into closed_trades(
+                    code, entry_price, exit_price, shares, entry_date, exit_date, reason, note, fee,
+                    realized_profit_pct, realized_profit_amount, holding_days, closed_at, remaining_shares, source, payload
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    position.entry_price,
+                    exit_input.exit_price,
+                    close_shares,
+                    position.entry_date,
+                    exit_date,
+                    exit_input.reason.strip(),
+                    exit_input.note.strip(),
+                    exit_input.fee,
+                    realized_pct,
+                    realized_amount,
+                    holding_days,
+                    closed_at.isoformat(),
+                    remaining_shares,
+                    "manual",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+            if remaining_shares is None:
+                conn.execute("delete from positions where code = ?", (code,))
+            else:
+                conn.execute(
+                    "update positions set shares = ?, note = ?, updated_at = ? where code = ?",
+                    (remaining_shares, position.note, closed_at.isoformat(), code),
+                )
+
+            return TradeRecord(
+                id=int(cursor.lastrowid),
+                code=code,
+                entry_price=position.entry_price,
+                exit_price=exit_input.exit_price,
+                shares=close_shares,
+                entry_date=position.entry_date,
+                exit_date=exit_date,
+                reason=exit_input.reason.strip(),
+                note=exit_input.note.strip(),
+                fee=exit_input.fee,
+                realized_profit_pct=realized_pct,
+                realized_profit_amount=realized_amount,
+                holding_days=holding_days,
+                closed_at=closed_at,
+                remaining_shares=remaining_shares,
+            )
+
+    def closed_trades(self, code: str | None = None, limit: int = 200) -> list[TradeRecord]:
+        with self._connect() as conn:
+            if code:
+                rows = conn.execute(
+                    "select * from closed_trades where code = ? order by closed_at desc, id desc limit ?",
+                    (code, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "select * from closed_trades order by closed_at desc, id desc limit ?",
+                    (limit,),
+                ).fetchall()
+        return [self._trade_from_row(row) for row in rows]
+
     def delete_position(self, code: str) -> bool:
         with self._lock, self._connect() as conn:
             cursor = conn.execute("delete from positions where code = ?", (code,))
@@ -395,17 +518,54 @@ class Store:
     def positions(self) -> dict[str, Position]:
         with self._connect() as conn:
             rows = conn.execute("select * from positions").fetchall()
-        result: dict[str, Position] = {}
-        for row in rows:
-            result[row["code"]] = Position(
-                code=row["code"],
-                entry_price=row["entry_price"],
-                shares=row["shares"],
-                entry_date=row["entry_date"],
-                note=row["note"],
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-            )
-        return result
+        return {row["code"]: self._position_from_row(row) for row in rows}
+
+    def _position_from_row(self, row: sqlite3.Row) -> Position:
+        return Position(
+            code=row["code"],
+            entry_price=row["entry_price"],
+            shares=row["shares"],
+            entry_date=row["entry_date"],
+            note=row["note"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def _trade_from_row(self, row: sqlite3.Row) -> TradeRecord:
+        return TradeRecord(
+            id=row["id"],
+            code=row["code"],
+            entry_price=row["entry_price"],
+            exit_price=row["exit_price"],
+            shares=row["shares"],
+            entry_date=row["entry_date"],
+            exit_date=row["exit_date"],
+            reason=row["reason"],
+            note=row["note"],
+            fee=row["fee"],
+            realized_profit_pct=row["realized_profit_pct"],
+            realized_profit_amount=row["realized_profit_amount"],
+            holding_days=row["holding_days"],
+            closed_at=datetime.fromisoformat(row["closed_at"]),
+            remaining_shares=row["remaining_shares"],
+            source=row["source"],
+        )
+
+    def _remaining_shares(self, position_shares: float | None, close_shares: float | None) -> float | None:
+        if position_shares is None:
+            return None
+        if close_shares is None:
+            return None
+        return position_shares - close_shares
+
+    def _holding_days(self, entry_date: str | None, exit_date: str) -> int | None:
+        if not entry_date:
+            return None
+        try:
+            entry = date.fromisoformat(entry_date)
+            exit_day = date.fromisoformat(exit_date)
+        except ValueError:
+            return None
+        return max(0, (exit_day - entry).days)
 
     def save_signal_history(self, plans: list[TradePlan]) -> None:
         signal_at = datetime.now(timezone.utc).isoformat()

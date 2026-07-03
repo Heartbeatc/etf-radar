@@ -593,6 +593,10 @@ class QuantStockExecutionPlan(BaseModel):
     take_profit_price: float | None = None
     trigger_signal: str
     invalidation_signal: str
+    capital_exit_signal: str
+    reduce_signal: str
+    hard_exit_signal: str
+    after_buy_plan: str
     position_plan: str
     conditions: list[QuantStockExecutionCondition] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)

@@ -356,6 +356,10 @@ def _stock_execution_plan(
 
     trigger_signal = _trigger_signal(zone_low, zone_high)
     invalidation_signal = _invalidation_signal(stop_price)
+    capital_exit_signal = _capital_exit_signal(direction, stock, zone_low, stop_price)
+    reduce_signal = _reduce_signal(zone_low, inflow_pct)
+    hard_exit_signal = _hard_exit_signal(stop_price)
+    after_buy_plan = _after_buy_plan(decision_state)
     return QuantStockExecutionPlan(
         decision_state=decision_state,
         decision_label=decision_label,
@@ -368,10 +372,46 @@ def _stock_execution_plan(
         take_profit_price=take_profit_price,
         trigger_signal=trigger_signal,
         invalidation_signal=invalidation_signal,
+        capital_exit_signal=capital_exit_signal,
+        reduce_signal=reduce_signal,
+        hard_exit_signal=hard_exit_signal,
+        after_buy_plan=after_buy_plan,
         position_plan=position_plan,
         conditions=conditions,
         blockers=_dedupe([*base_risks, *blockers])[:8],
     )
+
+
+def _capital_exit_signal(direction: MarketDirection, stock: MarketStockCandidate, zone_low: float | None, stop_price: float | None) -> str:
+    zone = "-" if zone_low is None else f"{zone_low:.2f}"
+    stop = "-" if stop_price is None else f"{stop_price:.2f}"
+    return (
+        f"买后若方向由{direction.state}转弱、方向跌出前排，或个股主力净流入占比连续两轮<0；"
+        f"同时价格跌破低吸区下沿{zone}，先减仓；跌破防守{stop}直接离场。"
+    )
+
+
+def _reduce_signal(zone_low: float | None, inflow_pct: float) -> str:
+    zone = "-" if zone_low is None else f"{zone_low:.2f}"
+    return (
+        f"买后若净流入占比从买入时转为<-3%，或当前净流入占比{inflow_pct:.2f}%继续恶化，"
+        f"且价格不能重新站回{zone}，减仓50%或撤退。"
+    )
+
+
+def _hard_exit_signal(stop_price: float | None) -> str:
+    stop = "-" if stop_price is None else f"{stop_price:.2f}"
+    return f"任何时候跌破防守价{stop}，不再等待主力回流，直接按风险失败处理。"
+
+
+def _after_buy_plan(decision_state: str) -> str:
+    if decision_state == "buy_probe":
+        return "买入后只观察承接是否延续；资金转负或方向掉队先减仓，跌破防守价离场。"
+    if decision_state == "wait_confirmation":
+        return "价格到了但未买；若后续承接不过阈值，不做交易。"
+    if decision_state in {"wait_pullback", "wait_buy_zone"}:
+        return "尚未买入；继续等待价格和资金条件同时满足。"
+    return "当前不开仓；不需要承担买后资金撤退风险。"
 
 
 def _stock_final_action(base_action: str, execution: QuantStockExecutionPlan) -> str:

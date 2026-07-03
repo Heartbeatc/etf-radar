@@ -28,6 +28,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
           <col className="zone-col" />
           <col className="trigger-col" />
           <col className="risk-col" />
+          <col className="exit-col" />
           <col className="action-col" />
         </colgroup>
         <thead>
@@ -42,6 +43,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <th>G</th>
             <th>H</th>
             <th>I</th>
+            <th>J</th>
           </tr>
         </thead>
         <tbody>
@@ -51,7 +53,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td className="sheet-meta">{formatDateTime(decision?.generated_at)}</td>
             <td className="sheet-meta">30 秒刷新</td>
             <td className="sheet-meta">{decision?.market_status ?? '-'}</td>
-            <td className="sheet-meta" colSpan={4}>{decision?.conclusion ?? '等待数据'}</td>
+            <td className="sheet-meta" colSpan={5}>{decision?.conclusion ?? '等待数据'}</td>
             <td className="sheet-actions">
               <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? '刷新中' : '刷新'}</button>
               <button type="button" onClick={onLogout}>退出</button>
@@ -67,6 +69,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td>低吸区</td>
             <td>触发信号</td>
             <td>防守/止盈</td>
+            <td>撤退规则</td>
             <td>动作</td>
           </tr>
           {rows.map((stock, index) => (
@@ -80,13 +83,14 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
               <td>{stock ? formatZone(stock) : '-'}</td>
               <td>{stock?.execution?.trigger_signal ?? '-'}</td>
               <td>{stock ? formatRiskCell(stock) : '-'}</td>
+              <td>{stock ? formatExitCell(stock) : '-'}</td>
               <td>{stock ? formatActionCell(stock) : '等待'}</td>
             </tr>
           ))}
           {errorMessage && (
             <tr>
               <th className="row-index">{rows.length + 3}</th>
-              <td className="sheet-error" colSpan={9}>{errorMessage}</td>
+              <td className="sheet-error" colSpan={10}>{errorMessage}</td>
             </tr>
           )}
         </tbody>
@@ -178,6 +182,17 @@ function formatRiskCell(item: QuantStockDecision) {
     <>
       <strong>防守 {formatPrice(execution?.stop_price)}</strong>
       <span>止盈 {formatPrice(execution?.take_profit_price)}</span>
+    </>
+  );
+}
+
+function formatExitCell(item: QuantStockDecision) {
+  const execution = item.execution;
+  return (
+    <>
+      <strong>主力走弱先减仓</strong>
+      <span>{execution?.reduce_signal ?? '-'}</span>
+      <span>{execution?.hard_exit_signal ?? execution?.invalidation_signal ?? '-'}</span>
     </>
   );
 }

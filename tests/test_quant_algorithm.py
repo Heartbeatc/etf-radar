@@ -240,3 +240,16 @@ def test_stock_execution_does_not_upgrade_weak_verifier_to_buy():
     assert item.execution is not None
     assert any(condition.key == "stock_quality" and condition.status == "pending" for condition in item.execution.conditions)
     assert "验证方向" in item.execution.conditions[-1].reason
+
+
+
+def test_stock_execution_contains_after_buy_exit_rules():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    report = build_quant_decision_report(flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=leaders)]))
+    execution = report.stocks[0].execution
+
+    assert execution is not None
+    assert "净流入" in execution.reduce_signal
+    assert "防守价" in execution.hard_exit_signal
+    assert "资金" in execution.after_buy_plan
+    assert "主力" in execution.capital_exit_signal

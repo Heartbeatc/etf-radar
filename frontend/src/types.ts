@@ -336,6 +336,10 @@ export interface QuantStockExecutionPlan {
   take_profit_price: number | null;
   trigger_signal: string;
   invalidation_signal: string;
+  capital_exit_signal: string;
+  reduce_signal: string;
+  hard_exit_signal: string;
+  after_buy_plan: string;
   position_plan: string;
   conditions: QuantStockExecutionCondition[];
   blockers: string[];

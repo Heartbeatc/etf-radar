@@ -42,7 +42,7 @@ input {
 }
 
 .excel-sheet {
-  width: max(1580px, 100%);
+  width: max(1780px, 100%);
   border-collapse: collapse;
   table-layout: fixed;
   background: #fff;
@@ -84,7 +84,11 @@ input {
 }
 
 .risk-col {
-  width: 160px;
+  width: 150px;
+}
+
+.exit-col {
+  width: 290px;
 }
 
 .action-col {
@@ -220,6 +224,6 @@ input {
   }
 
   .excel-sheet {
-    width: 1580px;
+    width: 1780px;
   }
 }

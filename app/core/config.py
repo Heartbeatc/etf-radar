@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     discovery_min_amount: float = Field(default=50_000_000, ge=1_000_000)
     discovery_max_directions: int = Field(default=8, ge=3, le=20)
 
+    event_corpus_enabled: bool = True
+    event_corpus_source_urls: str = ""
+    event_corpus_cache_seconds: int = Field(default=300, ge=60, le=3600)
+    event_corpus_max_items: int = Field(default=160, ge=20, le=1000)
+    event_corpus_request_timeout_seconds: float = Field(default=8.0, ge=2.0, le=30.0)
+
     ai_enabled: bool = False
     ai_summary_daily_call_limit: int = Field(default=4, ge=0, le=20)
     ai_summary_force_cooldown_seconds: int = Field(default=1800, ge=300, le=14_400)
@@ -100,6 +106,14 @@ class Settings(BaseSettings):
     @property
     def benchmark_code_list(self) -> list[str]:
         return _csv(self.benchmark_codes)
+
+    @property
+    def event_source_url_list(self) -> list[str]:
+        value = self.event_corpus_source_urls.strip()
+        if not value:
+            return []
+        delimiter = "\n" if "\n" in value else ";"
+        return [item.strip() for item in value.split(delimiter) if item.strip()]
 
     @property
     def allowed_hosts(self) -> list[str]:

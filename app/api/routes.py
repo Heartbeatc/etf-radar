@@ -17,6 +17,7 @@ from app.domain.models import (
     DataQualityReport,
     DiscoveryResponse,
     EtfSnapshot,
+    EventCorpusReport,
     IntegrationStatus,
     LatestResponse,
     MarketFlowResponse,
@@ -131,6 +132,9 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     async def market_flow(force: bool = Query(default=False)) -> MarketFlowResponse:
         return await runtime.market_flow(force=force)
 
+    @app.get("/api/v1/event-corpus", response_model=EventCorpusReport, dependencies=PROTECTED)
+    async def event_corpus(force: bool = Query(default=False)) -> EventCorpusReport:
+        return await runtime.event_corpus(force=force)
 
 
     @app.get("/api/v1/quant-decision", response_model=QuantDecisionResponse, dependencies=PROTECTED)

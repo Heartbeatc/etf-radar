@@ -10,14 +10,17 @@ from typing import Any
 
 from app.adapters.market_flow import EastmoneyMarketFlowClient, from_epoch, integer, num
 from app.domain.models import (
+    DirectionEventSignal,
     DiscoveryEtfCandidate,
     DiscoveryResponse,
+    EventCorpusReport,
     MarketBoardCandidate,
     MarketDirection,
     MarketFlowResponse,
     MarketStockCandidate,
 )
 from app.services.discovery import DIRECTION_RULES
+from app.services.event_corpus import direction_event_scores
 
 EXCLUDED_BOARD_KEYWORDS = (
     "昨日", "ST股", "融资融券", "转债", "破净", "预亏", "亏损", "退市", "次新", "新股",
@@ -109,6 +112,7 @@ async def build_market_flow_report(
     client: EastmoneyMarketFlowClient,
     *,
     etf_report: DiscoveryResponse | None = None,
+    event_report: EventCorpusReport | None = None,
     max_directions: int = 8,
     board_member_samples: int = 14,
     history: list[MarketFlowResponse] | None = None,
@@ -116,7 +120,7 @@ async def build_market_flow_report(
     rows = await client.fetch_boards()
     boards = build_board_candidates(rows)
     stock_sample_count = await _attach_representative_stocks(client, boards, board_member_samples)
-    directions = _directions_from_boards(boards, etf_report, history or [])
+    directions = _directions_from_boards(boards, etf_report, history or [], event_report)
     warnings: list[str] = []
     if not boards:
         warnings.append("免费行情源未返回行业/概念板块资金数据，市场流向暂不可用")
@@ -317,12 +321,14 @@ def _directions_from_boards(
     boards: list[MarketBoardCandidate],
     etf_report: DiscoveryResponse | None,
     history: list[MarketFlowResponse],
+    event_report: EventCorpusReport | None,
 ) -> list[MarketDirection]:
     groups: dict[str, list[MarketBoardCandidate]] = defaultdict(list)
     for board in boards:
         groups[board.direction_key].append(board)
     etfs_by_direction = _etfs_by_direction(etf_report)
     history_by_direction = _history_by_direction(history)
+    events_by_direction = direction_event_scores(event_report)
     market_amount = sum(item.amount or 0 for item in boards)
     directions: list[MarketDirection] = []
     for key, items in groups.items():
@@ -338,6 +344,7 @@ def _directions_from_boards(
         main_etfs, backup_etf = _select_direction_etfs(key, linked_etfs)
         linked_stocks = _direction_stocks(items)
         representative = linked_stocks[0] if linked_stocks else _best_direction_stock(items)
+        event_signal = events_by_direction.get(key)
         factor_scores, concentration_pct = _direction_factor_scores(
             items=items,
             total_amount=total_amount,
@@ -348,12 +355,15 @@ def _directions_from_boards(
             linked_etfs=linked_etfs,
             linked_stocks=linked_stocks,
             history_stats=history_by_direction.get(key, DirectionHistoryStats()),
+            event_signal=event_signal,
         )
         score = factor_scores["mainline_probability"]
         state = _quant_direction_state(factor_scores, inflow)
-        evidence = _direction_evidence(items, breadth, inflow, linked_etfs)
+        evidence = _direction_evidence(items, breadth, inflow, linked_etfs, event_signal)
         evidence.extend(_quant_evidence(factor_scores, concentration_pct, state))
         risk_flags = _direction_risks(items, breadth, inflow)
+        if event_signal is not None and event_signal.score >= 55 and state in {"hot_today", "watch_direction", "weak_direction"}:
+            risk_flags.append("事件催化尚未被资金驻留和多日承接验证")
         risk_flags.extend(_quant_risks(factor_scores, state, linked_etfs))
         trade_action = _trade_action(state, factor_scores)
         directions.append(
@@ -601,6 +611,7 @@ def _evidence_quality(
     linked_etfs: list[DiscoveryEtfCandidate],
     linked_stocks: list[MarketStockCandidate],
     history_days: int,
+    event_score: int,
 ) -> int:
     score = 28.0
     if breadth is not None:
@@ -612,6 +623,7 @@ def _evidence_quality(
     if len(linked_etfs) >= 2:
         score += 8
     score += min(24, history_days * 8)
+    score += min(10, event_score * 0.12)
     return _clamp(score)
 
 
@@ -626,6 +638,7 @@ def _direction_factor_scores(
     linked_etfs: list[DiscoveryEtfCandidate],
     linked_stocks: list[MarketStockCandidate],
     history_stats: DirectionHistoryStats,
+    event_signal: DirectionEventSignal | None = None,
 ) -> tuple[dict[str, int], float | None]:
     concentration_pct = total_amount / market_amount * 100 if market_amount > 0 else None
     concentration_bonus = (concentration_pct or 0.0) * 3.2
@@ -650,6 +663,8 @@ def _direction_factor_scores(
     leadership = _clamp(stock_score * 0.6 + board_score * 0.4)
 
     etf_confirmation = _etf_confirmation_score(linked_etfs)
+    event_score = event_signal.score if event_signal is not None else 0
+    event_count = event_signal.event_count if event_signal is not None else 0
     intraday_strength = _clamp(
         capital_weight * 0.20
         + volume_expansion * 0.16
@@ -694,6 +709,7 @@ def _direction_factor_scores(
         linked_etfs=linked_etfs,
         linked_stocks=linked_stocks,
         history_days=history_stats.days_count,
+        event_score=event_score,
     )
     low_buy_readiness = _low_buy_readiness(linked_etfs, relative_strength, breadth_score, flow_proxy)
     raw_probability = _clamp(
@@ -701,8 +717,9 @@ def _direction_factor_scores(
         + retention * 0.20
         + intraday_strength * 0.16
         + etf_confirmation * 0.08
-        + persistence * 0.24
+        + persistence * 0.22
         + evidence_quality * 0.08
+        + event_score * 0.02
     )
     uncapped_probability = _clamp(raw_probability - max(0, impulse_risk - 45) * 0.40)
     mainline_probability, evidence_cap = _apply_probability_evidence_cap(
@@ -737,6 +754,8 @@ def _direction_factor_scores(
         "history_observations": history_stats.observations,
         "impulse_risk": impulse_risk,
         "evidence_quality": evidence_quality,
+        "event_score": event_score,
+        "event_count": event_count,
         "raw_mainline_probability": raw_probability,
         "uncapped_mainline_probability": uncapped_probability,
         "evidence_cap": evidence_cap,
@@ -961,6 +980,7 @@ def _direction_evidence(
     breadth: float | None,
     inflow: float,
     etfs: list[DiscoveryEtfCandidate],
+    event_signal: DirectionEventSignal | None = None,
 ) -> list[str]:
     evidence: list[str] = []
     if len(items) >= 2:
@@ -973,6 +993,8 @@ def _direction_evidence(
         evidence.append("前排板块成交容量足够")
     if etfs:
         evidence.append("该方向存在可交易ETF载体")
+    if event_signal is not None and event_signal.score >= 45:
+        evidence.append(f"公开事件催化分 {event_signal.score}，事件数 {event_signal.event_count}")
     return evidence[:8]
 
 

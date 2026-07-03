@@ -456,6 +456,45 @@ class MarketFlowResponse(BaseModel):
     assumptions: list[str]
 
 
+class EventItem(BaseModel):
+    id: str
+    source: str
+    title: str
+    summary: str = ""
+    url: str | None = None
+    published_at: datetime | None = None
+    fetched_at: datetime
+    direction_key: str | None = None
+    direction_label: str | None = None
+    relevance_score: int = 0
+    sentiment: str = "neutral"
+    catalyst_type: str = "unknown"
+    symbols: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    raw_hash: str
+
+
+class DirectionEventSignal(BaseModel):
+    direction_key: str
+    direction_label: str
+    event_count: int
+    latest_event_at: datetime | None = None
+    score: int
+    catalysts: list[str] = Field(default_factory=list)
+    top_events: list[EventItem] = Field(default_factory=list)
+
+
+class EventCorpusReport(BaseModel):
+    generated_at: datetime
+    source: str
+    fetched_count: int
+    stored_count: int
+    items: list[EventItem]
+    direction_signals: list[DirectionEventSignal]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class PoolRecommendationItem(BaseModel):
     code: str
     name: str

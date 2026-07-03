@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.adapters.clickhouse import ClickHouseWriter
+from app.adapters.event_sources import FreeEventSourceClient
 from app.adapters.market_data import MarketDataClient
 from app.adapters.market_flow import EastmoneyMarketFlowClient
 from app.adapters.event_bus import KafkaEventBus
@@ -15,11 +16,12 @@ from app.adapters.infra import PostgresInfra, RedisInfra
 from app.adapters.store import Store
 from app.core.config import Settings
 from app.core.market import market_status
-from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, SourceStatus, TradePlan
+from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, EventCorpusReport, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, SourceStatus, TradePlan
 from app.services.ai import AIAnalyst
 from app.services.ai_summary import build_ai_context, due_summary_kinds, make_summary_item, summary_title, summary_windows_payload, trading_date
 from app.services.alerts import AlertManager
 from app.services.discovery import build_discovery_report
+from app.services.event_corpus import build_event_corpus_report
 from app.services.market_flow import build_market_flow_report
 from app.services.pipeline import TOPIC_SUFFIXES, build_rule_plans, model_payload, monitor_codes, roles_for, source_status_for, trade_codes
 from app.services.scoring import AnalysisInputs, build_plan
@@ -33,6 +35,7 @@ class Runtime:
         self.client = MarketDataClient(settings)
         self.universe_client = EastmoneyEtfUniverseClient()
         self.market_flow_client = EastmoneyMarketFlowClient()
+        self.event_source_client = FreeEventSourceClient(settings)
         self.ai = AIAnalyst(settings)
         self.alerts = AlertManager(settings, self.store)
         self.event_bus = KafkaEventBus(settings)
@@ -46,6 +49,7 @@ class Runtime:
         self._integration_errors: dict[str, str | None] = {"kafka": None, "clickhouse": None, "postgres": None, "redis": None}
         self._discovery_cache: tuple[datetime, DiscoveryResponse] | None = None
         self._market_flow_cache: tuple[datetime, MarketFlowResponse] | None = None
+        self._event_corpus_cache: tuple[datetime, EventCorpusReport] | None = None
 
     async def start(self) -> None:
         await self._setup_integrations()
@@ -76,6 +80,7 @@ class Runtime:
         await self.redis.close()
         await self.universe_client.close()
         await self.market_flow_client.close()
+        await self.event_source_client.close()
         await self.client.close()
 
     async def _setup_integrations(self) -> None:
@@ -177,18 +182,43 @@ class Runtime:
             if (now - cached_at).total_seconds() <= self.settings.discovery_cache_seconds:
                 return cached
         etf_report: DiscoveryResponse | None = None
+        event_report: EventCorpusReport | None = None
         try:
             etf_report = await self.discovery(force=force)
         except Exception:
             etf_report = None
+        if self.settings.event_corpus_enabled and self.settings.event_source_url_list:
+            try:
+                event_report = await self.event_corpus(force=force)
+            except Exception:
+                event_report = None
         report = await build_market_flow_report(
             self.market_flow_client,
             etf_report=etf_report,
+            event_report=event_report,
             max_directions=self.settings.discovery_max_directions,
             history=self.store.market_flow_history(),
         )
         self.store.save_market_flow_report(report)
         self._market_flow_cache = (now, report)
+        return report
+
+    async def event_corpus(self, force: bool = False) -> EventCorpusReport:
+        now = datetime.now(timezone.utc)
+        if not force and self._event_corpus_cache is not None:
+            cached_at, cached = self._event_corpus_cache
+            if (now - cached_at).total_seconds() <= self.settings.event_corpus_cache_seconds:
+                return cached
+        fetched, warnings = await self.event_source_client.fetch()
+        inserted = self.store.save_event_items(fetched) if fetched else 0
+        recent = self.store.event_items(limit=self.settings.event_corpus_max_items)
+        report = build_event_corpus_report(
+            items=recent,
+            fetched_count=len(fetched),
+            stored_count=inserted,
+            warnings=warnings,
+        )
+        self._event_corpus_cache = (now, report)
         return report
 
     async def latest(self) -> LatestResponse:

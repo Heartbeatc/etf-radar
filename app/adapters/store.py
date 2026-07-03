@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
+from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
 
 
 class Store:
@@ -137,6 +137,19 @@ class Store:
                 );
                 create index if not exists idx_market_flow_history_time on market_flow_history(generated_at desc);
 
+                create table if not exists event_items (
+                    id text primary key,
+                    source text not null,
+                    title text not null,
+                    published_at text,
+                    fetched_at text not null,
+                    direction_key text,
+                    relevance_score integer not null,
+                    payload text not null
+                );
+                create index if not exists idx_event_items_time on event_items(published_at desc, fetched_at desc);
+                create index if not exists idx_event_items_direction on event_items(direction_key, published_at desc, fetched_at desc);
+
                 create table if not exists runtime_settings (
                     key text primary key,
                     value text not null,
@@ -233,6 +246,74 @@ class Store:
             except Exception:
                 continue
         return reports
+
+    def save_event_items(self, items: list[EventItem]) -> int:
+        inserted = 0
+        with self._lock, self._connect() as conn:
+            for item in items:
+                payload = item.model_dump_json()
+                published_at = item.published_at.isoformat() if item.published_at else None
+                fetched_at = item.fetched_at.isoformat()
+                cursor = conn.execute(
+                    """
+                    insert or ignore into event_items(
+                        id, source, title, published_at, fetched_at, direction_key, relevance_score, payload
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.id,
+                        item.source,
+                        item.title,
+                        published_at,
+                        fetched_at,
+                        item.direction_key,
+                        item.relevance_score,
+                        payload,
+                    ),
+                )
+                if cursor.rowcount:
+                    inserted += 1
+                else:
+                    conn.execute(
+                        """
+                        update event_items
+                        set source = ?, title = ?, published_at = ?, fetched_at = ?,
+                            direction_key = ?, relevance_score = ?, payload = ?
+                        where id = ?
+                        """,
+                        (
+                            item.source,
+                            item.title,
+                            published_at,
+                            fetched_at,
+                            item.direction_key,
+                            item.relevance_score,
+                            payload,
+                            item.id,
+                        ),
+                    )
+            conn.execute(
+                "delete from event_items where id not in (select id from event_items order by fetched_at desc limit 10000)"
+            )
+        return inserted
+
+    def event_items(self, direction_key: str | None = None, limit: int = 200) -> list[EventItem]:
+        limit = max(1, min(limit, 1000))
+        if direction_key:
+            sql = "select payload from event_items where direction_key = ? order by coalesce(published_at, fetched_at) desc limit ?"
+            params: tuple[Any, ...] = (direction_key, limit)
+        else:
+            sql = "select payload from event_items order by coalesce(published_at, fetched_at) desc limit ?"
+            params = (limit,)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        events: list[EventItem] = []
+        for row in rows:
+            try:
+                events.append(EventItem.model_validate_json(row["payload"]))
+            except Exception:
+                continue
+        return events
 
     def save_daily_bars(self, code: str, bars: list[DailyBar]) -> None:
         self._save_bars("daily_bars", code, [bar.model_dump() for bar in bars])

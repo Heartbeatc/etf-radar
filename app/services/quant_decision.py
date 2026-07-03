@@ -65,6 +65,7 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
         )
     phase, label, confidence, operation = _phase(direction)
     evidence = [
+        f"7日方向 {direction.factor_scores.get('seven_day_score', 0)}",
         f"主线概率 {direction.mainline_probability}",
         f"资金驻留 {direction.residency_score}",
         f"承接 {direction.retention_score}",
@@ -83,6 +84,7 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
         confidence=confidence,
         operation=operation,
         mainline_probability=direction.mainline_probability,
+        seven_day_score=direction.factor_scores.get("seven_day_score"),
         residency_score=direction.residency_score,
         retention_score=direction.retention_score,
         low_buy_readiness_score=direction.low_buy_readiness_score,

@@ -286,6 +286,7 @@ export interface QuantDirectionDecision {
   confidence: string;
   operation: string;
   mainline_probability: number | null;
+  seven_day_score: number | null;
   residency_score: number | null;
   retention_score: number | null;
   low_buy_readiness_score: number | null;

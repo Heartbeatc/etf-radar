@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import log10
 from statistics import mean
 from typing import Any
@@ -27,6 +27,8 @@ EXCLUDED_BOARD_KEYWORDS = (
 )
 EXCLUDED_STOCK_KEYWORDS = ("ST", "退", "N", "C")
 CROSS_BORDER_ETF_KEYWORDS = ("港股", "港股通", "恒生", "中概", "H股", "香港", "纳斯达克", "标普", "日经", "德国")
+HISTORY_WINDOW_DAYS = 7
+
 A_SHARE_PREFERRED_DIRECTIONS = {
     "innovative_drug",
     "semiconductor",
@@ -63,6 +65,10 @@ class DirectionHistoryStats:
     avg_residency: float = 0.0
     avg_retention: float = 0.0
     avg_intraday: float = 0.0
+    avg_rank: float = 99.0
+    top3_rate: float = 0.0
+    candidate_rate: float = 0.0
+    weakening_rate: float = 0.0
 
 
 
@@ -128,6 +134,9 @@ async def build_market_flow_report(
         warnings.append("当前未确认主线；前排方向只是热点/候选，需要下一交易日承接和资金驻留验证")
     if directions:
         warnings.append("资金驻留/承接分为免费数据代理指标，证据强度低于 Level-2 或交易所逐笔数据")
+    history_days = max((item.factor_scores.get("history_days", 0) for item in directions), default=0)
+    if directions and history_days < HISTORY_WINDOW_DAYS:
+        warnings.append(f"本地市场流向历史仅覆盖{history_days}个自然日；7日方向分会随样本补齐后更稳定")
     if directions and all(item.factor_scores.get("history_days", 0) < 3 for item in directions[:3]):
         warnings.append("前排方向缺少至少3个交易日的历史驻留样本，禁止判定为确认主线")
     if any(item.main_net_inflow is not None and item.main_net_inflow < 0 for item in directions[:2]):
@@ -140,10 +149,10 @@ async def build_market_flow_report(
         directions=directions[:max_directions],
         warnings=warnings,
         assumptions=[
-            "资金流向先从行业/概念板块识别，再用强关联A股个股验证承接。",
+            "最近方向按本地最近7天方向分排序；单日爆发只能作为辅助权重。",
+            "资金流向先从行业/概念板块识别，再用A股龙头、二龙头和扩散股验证承接。",
             "强势个股只用于验证方向强度，不等于个股买入建议。",
             "确认主线需要至少3个交易日的历史驻留、方向内扩散、代表股承接和反证过滤。",
-            "单日成交额、量比、涨幅只能证明异动强度，不能单独证明主力资金驻留。",
             "免费源适合研究预警；个股买卖前仍需用更高质量行情和风控确认。",
         ],
     )
@@ -417,7 +426,15 @@ def _directions_from_boards(
                 risk_flags=risk_flags[:10],
             )
         )
-    directions.sort(key=lambda item: (item.score, item.factor_scores.get("intraday_strength", 0)), reverse=True)
+    directions.sort(
+        key=lambda item: (
+            item.factor_scores.get("seven_day_rank_score", 0),
+            item.factor_scores.get("seven_day_score", 0),
+            item.factor_scores.get("persistence", 0),
+            item.score,
+        ),
+        reverse=True,
+    )
     return directions
 
 
@@ -564,13 +581,21 @@ def _history_by_direction(history: list[MarketFlowResponse]) -> dict[str, Direct
         "residency": [],
         "retention": [],
         "intraday": [],
+        "ranks": [],
     })
-    for report in history[:240]:
-        day = report.generated_at.date().isoformat()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=HISTORY_WINDOW_DAYS)
+    for report in history:
+        generated_at = report.generated_at
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=timezone.utc)
+        if generated_at < cutoff:
+            continue
+        day = generated_at.date().isoformat()
         for rank, direction in enumerate(report.directions, start=1):
             bucket = raw[direction.direction_key]
             bucket["observations"] += 1
             bucket["days"].add(day)
+            bucket["ranks"].append(rank)
             if rank <= 3:
                 bucket["top3_hits"] += 1
             if direction.state in {"confirmed_mainline", "candidate"}:
@@ -586,17 +611,25 @@ def _history_by_direction(history: list[MarketFlowResponse]) -> dict[str, Direct
 
     stats: dict[str, DirectionHistoryStats] = {}
     for key, bucket in raw.items():
+        observations = max(int(bucket["observations"]), 1)
+        top3_hits = int(bucket["top3_hits"])
+        candidate_hits = int(bucket["candidate_hits"])
+        weakening_hits = int(bucket["weakening_hits"])
         stats[key] = DirectionHistoryStats(
             observations=int(bucket["observations"]),
             days_count=len(bucket["days"]),
-            top3_hits=int(bucket["top3_hits"]),
-            candidate_hits=int(bucket["candidate_hits"]),
+            top3_hits=top3_hits,
+            candidate_hits=candidate_hits,
             hot_hits=int(bucket["hot_hits"]),
-            weakening_hits=int(bucket["weakening_hits"]),
+            weakening_hits=weakening_hits,
             avg_score=mean(bucket["scores"]) if bucket["scores"] else 0.0,
             avg_residency=mean(bucket["residency"]) if bucket["residency"] else 0.0,
             avg_retention=mean(bucket["retention"]) if bucket["retention"] else 0.0,
             avg_intraday=mean(bucket["intraday"]) if bucket["intraday"] else 0.0,
+            avg_rank=mean(bucket["ranks"]) if bucket["ranks"] else 99.0,
+            top3_rate=top3_hits / observations,
+            candidate_rate=candidate_hits / observations,
+            weakening_rate=weakening_hits / observations,
         )
     return stats
 
@@ -679,6 +712,27 @@ def _evidence_quality(
     return _clamp(score)
 
 
+def _seven_day_direction_score(stats: DirectionHistoryStats) -> int:
+    if stats.observations <= 0:
+        return 25
+    score = (
+        stats.avg_score * 0.22
+        + stats.avg_residency * 0.16
+        + stats.avg_retention * 0.16
+        + stats.avg_intraday * 0.10
+        + stats.top3_rate * 20
+        + stats.candidate_rate * 14
+        + min(HISTORY_WINDOW_DAYS, stats.days_count) * 3.0
+        - max(0.0, stats.avg_rank - 3.0) * 2.0
+        - stats.weakening_rate * 22
+    )
+    if stats.days_count < 2:
+        score = min(score, 52)
+    elif stats.days_count < 3:
+        score = min(score, 64)
+    return _clamp(score)
+
+
 def _direction_factor_scores(
     *,
     items: list[MarketBoardCandidate],
@@ -748,6 +802,7 @@ def _direction_factor_scores(
 
     retention = _clamp(breadth_score * 0.28 + leadership * 0.24 + flow_proxy * 0.20 + volume_expansion * 0.14 + carrier_confirmation * 0.14)
     persistence = _persistence_score(history_stats)
+    seven_day_score = _seven_day_direction_score(history_stats)
     impulse_risk = _impulse_risk(
         volume_expansion=volume_expansion,
         intraday_strength=intraday_strength,
@@ -791,6 +846,13 @@ def _direction_factor_scores(
         low_buy_readiness=low_buy_readiness,
     )
 
+    seven_day_rank_score = _clamp(
+        seven_day_score * 0.70
+        + mainline_probability * 0.18
+        + intraday_strength * 0.12
+        - max(0, impulse_risk - 50) * 0.10
+    )
+
     return {
         "capital_weight": capital_weight,
         "volume_expansion": volume_expansion,
@@ -806,8 +868,13 @@ def _direction_factor_scores(
         "residency": _clamp(residency),
         "retention": retention,
         "persistence": persistence,
+        "seven_day_score": seven_day_score,
+        "seven_day_rank_score": seven_day_rank_score,
+        "history_window_days": HISTORY_WINDOW_DAYS,
         "history_days": history_stats.days_count,
         "history_observations": history_stats.observations,
+        "history_top3_rate": _clamp(history_stats.top3_rate * 100),
+        "history_avg_rank": _clamp(history_stats.avg_rank * 10),
         "impulse_risk": impulse_risk,
         "evidence_quality": evidence_quality,
         "event_score": event_score,
@@ -1022,6 +1089,8 @@ def _quant_evidence(factors: dict[str, int], concentration_pct: float | None, st
         evidence.append("资金驻留代理分较强，仍需多日确认")
     if factors["retention"] >= 65:
         evidence.append("资金承接代理分较强")
+    if factors.get("seven_day_score", 0) > 0:
+        evidence.append(f"7日方向分 {factors['seven_day_score']}，历史覆盖 {factors.get('history_days', 0)} 个自然日")
     if factors.get("persistence", 0) >= 65:
         evidence.append("历史方向驻留样本通过初步验证")
     elif factors.get("history_days", 0) < 3:

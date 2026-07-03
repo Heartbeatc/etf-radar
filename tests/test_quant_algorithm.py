@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.core.config import Settings
 from app.domain.models import DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
-from app.services.market_flow import _apply_probability_evidence_cap
+from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.quant_decision import _etf_decisions, build_quant_decision_report
 
@@ -51,11 +51,13 @@ def direction(
     probability: int = 82,
     low_buy: int = 68,
     linked_stocks: list[MarketStockCandidate] | None = None,
+    direction_key: str = "robotics_highend",
+    direction_label: str = "机器人/高端制造",
 ) -> MarketDirection:
     linked_stocks = linked_stocks or []
     return MarketDirection(
-        direction_key="robotics_highend",
-        direction_label="机器人/高端制造",
+        direction_key=direction_key,
+        direction_label=direction_label,
         score=probability,
         state=state,
         board_count=3,
@@ -83,9 +85,9 @@ def direction(
     )
 
 
-def flow_report(directions: list[MarketDirection]) -> MarketFlowResponse:
+def flow_report(directions: list[MarketDirection], generated_at: datetime | None = None) -> MarketFlowResponse:
     return MarketFlowResponse(
-        generated_at=datetime.now(timezone.utc),
+        generated_at=generated_at or datetime.now(timezone.utc),
         source="test",
         board_count=3,
         stock_sample_count=0,
@@ -174,3 +176,21 @@ def test_quant_decision_outputs_leader_and_second_leader_not_etfs():
     assert [item.verifier_role for item in report.stocks[:2]] == ["leader", "second_leader"]
     assert report.stocks[0].code == "688017"
     assert any("龙头" in item and "二龙头" in item for item in report.assumptions)
+
+
+def test_recent_direction_score_prefers_multi_day_residency_over_one_day_spike():
+    now = datetime.now(timezone.utc)
+    gold = direction("candidate", [], probability=60, direction_key="gold_resources", direction_label="黄金/资源")
+    filler_a = direction("candidate", [], probability=48, direction_key="innovative_drug", direction_label="创新药/医药")
+    filler_b = direction("candidate", [], probability=47, direction_key="dividend_value", direction_label="红利/央企价值")
+    robot_spike = direction("hot_today", [], probability=85, direction_key="robotics_highend", direction_label="机器人/高端制造")
+    history = [
+        flow_report([gold, filler_a, filler_b, robot_spike], generated_at=now - timedelta(days=offset))
+        for offset in range(3)
+    ]
+    history.append(flow_report([robot_spike], generated_at=now - timedelta(days=9)))
+
+    stats = _history_by_direction(history)
+
+    assert stats["robotics_highend"].days_count == 3
+    assert _seven_day_direction_score(stats["gold_resources"]) > _seven_day_direction_score(stats["robotics_highend"])

@@ -60,7 +60,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <th className="row-index">3</th>
             <td>
               <strong>{direction?.direction_label ?? '暂无方向'}</strong>
-              <span>{direction?.mainline_probability != null ? `主线 ${formatScore(direction.mainline_probability)}` : '-'}</span>
+              <span>{direction ? `7日 ${formatMaybeScore(direction.seven_day_score)} / 主线 ${formatMaybeScore(direction.mainline_probability)}` : '-'}</span>
             </td>
             <td>
               <strong className={`capital-${status.kind}`}>{status.label}</strong>

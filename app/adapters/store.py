@@ -230,10 +230,10 @@ class Store:
                 (report.generated_at.isoformat(), report.model_dump_json()),
             )
             conn.execute(
-                "delete from market_flow_history where id not in (select id from market_flow_history order by generated_at desc limit 600)"
+                "delete from market_flow_history where id not in (select id from market_flow_history order by generated_at desc limit 25000)"
             )
 
-    def market_flow_history(self, limit: int = 240) -> list[MarketFlowResponse]:
+    def market_flow_history(self, limit: int = 25000) -> list[MarketFlowResponse]:
         with self._connect() as conn:
             rows = conn.execute(
                 "select payload from market_flow_history order by generated_at desc limit ?",

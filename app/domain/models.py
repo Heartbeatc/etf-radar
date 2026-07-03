@@ -543,6 +543,7 @@ class QuantDirectionDecision(BaseModel):
     confidence: str
     operation: str
     mainline_probability: int | None = None
+    seven_day_score: int | None = None
     residency_score: int | None = None
     retention_score: int | None = None
     low_buy_readiness_score: int | None = None

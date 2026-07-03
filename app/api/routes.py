@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, HTTPException, Query
 
@@ -32,6 +33,7 @@ from app.domain.models import (
     QuantMaturityReport,
     QuantSelfAuditReport,
     QuantValidationReport,
+    StrategyValidationReport,
     Position,
     PositionAdjustInput,
     PositionAdjustRecord,
@@ -61,6 +63,7 @@ from app.services.quant_maturity import build_quant_maturity_report
 from app.services.quant_self_audit import build_quant_self_audit_report
 from app.services.quant_validation import build_quant_validation_report
 from app.services.risk import build_risk_report
+from app.services.strategy_validation import build_strategy_validation_report, validation_universe_codes
 from app.api.security import AuthPrincipal, authenticate_web_user, require_api_token
 
 PROTECTED = [Depends(require_api_token)]
@@ -176,6 +179,20 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         await runtime.generate_direction_shift_summary(market_flow_report)
         report.ai_direction_summaries = runtime.store.latest_ai_summaries(limit=3)
         return report
+
+
+    @app.get("/api/v1/strategy-validation", response_model=StrategyValidationReport, dependencies=PROTECTED)
+    async def strategy_validation(days: int = Query(default=120, ge=60, le=500)) -> StrategyValidationReport:
+        market_flow_report = await runtime.market_flow()
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        positions = runtime.store.positions()
+        plans = await runtime.build_rule_plans_for_pool(pool_report)
+        action_report = build_action_decision_report(plans, positions)
+        decision = build_quant_decision_report(market_flow_report, pool_report, action_report, positions=positions, plans=plans)
+        codes = validation_universe_codes(decision)
+        if codes:
+            await asyncio.gather(*(runtime.ensure_daily_bars(code) for code in codes), return_exceptions=True)
+        return build_strategy_validation_report(runtime.store, decision, days=days)
 
 
     @app.get("/api/v1/quant-framework", response_model=QuantFrameworkResponse, dependencies=PROTECTED)

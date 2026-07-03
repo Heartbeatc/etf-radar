@@ -308,6 +308,29 @@ button:disabled {
   background: #f8fff9;
 }
 
+.validation-row td {
+  background: #fffaf2;
+}
+
+.validation-badge {
+  margin-top: 2px;
+  font-weight: 700;
+}
+
+.validation-passed {
+  color: #107c10 !important;
+}
+
+.validation-watch,
+.validation-insufficient_data,
+.validation-insufficient_signal {
+  color: #b26a00 !important;
+}
+
+.validation-failed {
+  color: #c00000 !important;
+}
+
 .account-strip {
   grid-template-columns: 76px 120px 120px minmax(180px, 1fr) 90px;
 }

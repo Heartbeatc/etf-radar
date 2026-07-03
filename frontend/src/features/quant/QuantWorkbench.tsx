@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { AccountInput, PortfolioSnapshotResponse, PositionAdjustInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
+import type { AccountInput, PortfolioSnapshotResponse, PositionAdjustInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, StrategyValidationItem, StrategyValidationReport, TradeJournalResponse } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
   decision?: QuantDecisionResponse;
   tradeJournal?: TradeJournalResponse;
   portfolio?: PortfolioSnapshotResponse;
+  strategyValidation?: StrategyValidationReport;
   onRefresh: () => void;
   refreshing: boolean;
   onLogout: () => void;
@@ -24,6 +25,7 @@ export function QuantWorkbench({
   decision,
   tradeJournal,
   portfolio,
+  strategyValidation,
   onRefresh,
   refreshing,
   onLogout,
@@ -40,6 +42,7 @@ export function QuantWorkbench({
   const direction = decision?.direction;
   const holdings = decision?.holdings ?? [];
   const candidates = pickStocks(decision?.bottom_candidates ?? []);
+  const validationByCode = buildValidationMap(strategyValidation);
   const [cashBalance, setCashBalance] = useState('');
   const [frozenCash, setFrozenCash] = useState('');
   const [accountNote, setAccountNote] = useState('');
@@ -128,10 +131,12 @@ export function QuantWorkbench({
           <MarketRow decision={decision} direction={direction} />
           <PortfolioRow portfolio={portfolio} />
           <TradeSummaryRow journal={tradeJournal} />
+          <StrategyValidationRow report={strategyValidation} />
           {holdings.map((holding) => (
             <HoldingRow
               key={holding.code}
               item={holding}
+              validation={validationByCode.get(holding.code)}
               onAdjust={onAdjustPosition}
               onDelete={onDeletePosition}
               adjusting={adjustingPosition}
@@ -139,7 +144,7 @@ export function QuantWorkbench({
             />
           ))}
           {holdings.length === 0 && candidates.map((stock) => (
-            <CandidateRow key={stock.code} item={stock} onAdjust={onAdjustPosition} adjusting={adjustingPosition} />
+            <CandidateRow key={stock.code} item={stock} validation={validationByCode.get(stock.code)} onAdjust={onAdjustPosition} adjusting={adjustingPosition} />
           ))}
           {holdings.length === 0 && candidates.length === 0 ? <EmptyRow /> : null}
         </tbody>
@@ -244,14 +249,43 @@ function TradeSummaryRow({ journal }: { journal?: TradeJournalResponse }) {
   );
 }
 
+function StrategyValidationRow({ report }: { report?: StrategyValidationReport }) {
+  const total = report?.items.length ?? 0;
+  const best = report?.items.slice().sort((a, b) => b.validation_score - a.validation_score)[0];
+  return (
+    <tr className="validation-row">
+      <td>验证</td>
+      <td>
+        <strong>{report?.strategy.name ?? '策略验证'}</strong>
+        <span>Universe {report?.strategy.universe.length ?? 0} / {report?.days ?? '-'}日</span>
+      </td>
+      <td>
+        <strong>{validationSummary(report)}</strong>
+        <span>通过 {report?.pass_count ?? 0} / 观察 {report?.warning_count ?? 0} / 失败 {report?.fail_count ?? 0}</span>
+      </td>
+      <td>
+        <strong>{report?.strategy.engine ?? '等待'}</strong>
+        <span>LEAN {report?.strategy.lean_integration_status ?? 'pending'}</span>
+      </td>
+      <td>
+        <strong>{report && total > 0 ? validationAction(report) : '等待样本'}</strong>
+        <span>未通过验证不作为直接买入依据</span>
+      </td>
+      <td>{shortText(best ? `${best.code} ${best.validation_label} ${best.validation_score}分；${best.blockers[0] ?? best.notes[0] ?? ''}` : report?.assumptions[0] ?? '等待验证数据', 72)}</td>
+    </tr>
+  );
+}
+
 function HoldingRow({
   item,
+  validation,
   onAdjust,
   onDelete,
   adjusting,
   deleting
 }: {
   item: QuantHoldingDecision;
+  validation?: StrategyValidationItem;
   onAdjust: (code: string, input: PositionAdjustInput) => void;
   onDelete: (code: string) => void;
   adjusting: boolean;
@@ -311,6 +345,7 @@ function HoldingRow({
       <td>
         <strong className={pnlClass(item.floating_profit_pct)}>浮盈亏 {pctText(item.floating_profit_pct)}</strong>
         <span>{shortText(item.exit_plan, 42)}</span>
+        {validation ? <span className={`validation-badge validation-${validation.validation_state}`}>验证 {validation.validation_label} {validation.validation_score}分</span> : null}
         {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI {shortText(item.ai_risk_review.conclusion, 34)}</span> : null}
         <span className="row-actions">
           <button type="button" className="link-button primary-link" onClick={addPosition} disabled={adjusting}>加仓</button>
@@ -324,10 +359,12 @@ function HoldingRow({
 
 function CandidateRow({
   item,
+  validation,
   onAdjust,
   adjusting
 }: {
   item: QuantStockDecision;
+  validation?: StrategyValidationItem;
   onAdjust: (code: string, input: PositionAdjustInput) => void;
   adjusting: boolean;
 }) {
@@ -365,6 +402,7 @@ function CandidateRow({
       </td>
       <td>
         {shortText(execution?.decision_reason ?? item.operation, 46)}
+        {validation ? <span className={`validation-badge validation-${validation.validation_state}`}>验证 {validation.validation_label} {validation.validation_score}分</span> : null}
         <span className="row-actions">
           <button type="button" className="link-button primary-link" onClick={buy} disabled={adjusting}>买入记录</button>
         </span>
@@ -440,6 +478,28 @@ function EmptyRow() {
       <td colSpan={5}>暂无满足条件的买入候选。没有价格、方向、承接同时达标，就不交易。</td>
     </tr>
   );
+}
+
+function buildValidationMap(report?: StrategyValidationReport): Map<string, StrategyValidationItem> {
+  const map = new Map<string, StrategyValidationItem>();
+  for (const item of report?.items ?? []) {
+    map.set(item.code, item);
+  }
+  return map;
+}
+
+function validationSummary(report?: StrategyValidationReport): string {
+  if (!report) return '等待验证';
+  if (report.items.length === 0) return '暂无标的';
+  if (report.fail_count > 0) return '有失败样本';
+  if (report.pass_count > 0 && report.pass_count >= report.warning_count) return '部分通过';
+  return '观察为主';
+}
+
+function validationAction(report: StrategyValidationReport): string {
+  if (report.fail_count > 0) return '先降级风控';
+  if (report.pass_count > 0) return '只做通过项';
+  return '不直接买入';
 }
 
 function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {

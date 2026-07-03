@@ -39,6 +39,13 @@ function App() {
     30_000
   );
 
+  const strategyValidationQuery = useProtectedQuery(
+    ['strategy-validation', sessionToken],
+    sessionToken,
+    ({ signal }) => api.getStrategyValidation(sessionToken, signal),
+    120_000
+  );
+
   const unauthorized = decisionQuery.error instanceof ApiError && decisionQuery.error.status === 401;
   const firstLoad = Boolean(sessionToken) && decisionQuery.isLoading;
 
@@ -71,7 +78,10 @@ function App() {
 
   const forceRefreshMutation = useMutation({
     mutationFn: () => api.getMarketFlow(sessionToken, true),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-validation', sessionToken] });
+    },
     onError: (error) => message.error(getErrorMessage(error))
   });
 
@@ -90,6 +100,7 @@ function App() {
     onSuccess: () => {
       message.success('持仓已保存');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-validation', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
@@ -103,6 +114,7 @@ function App() {
       const costText = record.average_cost_after == null ? '' : `，成本 ${record.average_cost_after.toFixed(3)}`;
       message.success(`${sideLabel}已入账：${record.code}${costText}`);
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-validation', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
@@ -114,6 +126,7 @@ function App() {
     onSuccess: () => {
       message.success('持仓已删除');
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
+      queryClient.invalidateQueries({ queryKey: ['strategy-validation', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
     },
@@ -149,6 +162,7 @@ function App() {
             decision={decisionQuery.data}
             tradeJournal={tradesQuery.data}
             portfolio={portfolioQuery.data}
+            strategyValidation={strategyValidationQuery.data}
             onRefresh={() => forceRefreshMutation.mutate()}
             refreshing={forceRefreshMutation.isPending || decisionQuery.isFetching}
             onLogout={logout}
@@ -160,7 +174,7 @@ function App() {
             savingPosition={savePositionMutation.isPending}
             adjustingPosition={adjustPositionMutation.isPending}
             deletingPosition={deletePositionMutation.isPending}
-            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : portfolioQuery.error ? getErrorMessage(portfolioQuery.error) : null}
+            errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : portfolioQuery.error ? getErrorMessage(portfolioQuery.error) : strategyValidationQuery.error ? getErrorMessage(strategyValidationQuery.error) : null}
           />
         )}
       </Content>

@@ -474,6 +474,57 @@ class BacktestSummary(BaseModel):
     ranking: list[dict[str, Any]]
     assumptions: list[str]
 
+
+class StrategySpecRule(BaseModel):
+    key: str
+    label: str
+    operator: str
+    threshold: float | int | str | None = None
+    description: str
+
+
+class StrategySpec(BaseModel):
+    id: str
+    name: str
+    version: str
+    generated_at: datetime
+    engine: str = "internal_daily_replay"
+    direction_key: str | None = None
+    direction_label: str | None = None
+    universe: list[str]
+    entry_rules: list[StrategySpecRule]
+    exit_rules: list[StrategySpecRule]
+    risk_rules: list[StrategySpecRule]
+    position_rules: list[StrategySpecRule]
+    assumptions: list[str]
+    lean_integration_status: str = "adapter_pending"
+    pandora_integration_status: str = "not_integrated_execution_gateway"
+
+
+class StrategyValidationItem(BaseModel):
+    code: str
+    name: str
+    role: str
+    action: str
+    backtest: BacktestResult | None = None
+    validation_state: str
+    validation_label: str
+    validation_score: int
+    blockers: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class StrategyValidationReport(BaseModel):
+    generated_at: datetime
+    days: int
+    strategy: StrategySpec
+    items: list[StrategyValidationItem]
+    pass_count: int
+    warning_count: int
+    fail_count: int
+    assumptions: list[str]
+
+
 class DiscoveryEtfCandidate(BaseModel):
     code: str
     name: str

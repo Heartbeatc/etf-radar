@@ -800,7 +800,7 @@ class Runtime:
 
     async def ensure_daily_bars(self, code: str) -> list:
         daily = self.store.get_daily_bars(code)
-        if len(daily) >= 40:
+        if len(daily) >= 60:
             return daily
         daily = await self.client.fetch_daily(code)
         self.store.save_daily_bars(code, daily)

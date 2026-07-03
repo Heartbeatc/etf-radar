@@ -555,6 +555,80 @@ export interface QuantDecisionResponse {
   assumptions: string[];
 }
 
+export interface BacktestTrade {
+  entry_date: string;
+  entry_price: number;
+  exit_date: string | null;
+  exit_price: number | null;
+  return_pct: number | null;
+  reason: string | null;
+}
+
+export interface BacktestResult {
+  code: string;
+  name: string;
+  days: number;
+  bars_used: number;
+  trades: BacktestTrade[];
+  trade_count: number;
+  win_rate_pct: number | null;
+  total_return_pct: number;
+  max_drawdown_pct: number;
+  exposure_days: number;
+  latest_signal: string | null;
+  assumptions: string[];
+}
+
+export interface StrategySpecRule {
+  key: string;
+  label: string;
+  operator: string;
+  threshold: number | string | null;
+  description: string;
+}
+
+export interface StrategySpec {
+  id: string;
+  name: string;
+  version: string;
+  generated_at: string;
+  engine: string;
+  direction_key: string | null;
+  direction_label: string | null;
+  universe: string[];
+  entry_rules: StrategySpecRule[];
+  exit_rules: StrategySpecRule[];
+  risk_rules: StrategySpecRule[];
+  position_rules: StrategySpecRule[];
+  assumptions: string[];
+  lean_integration_status: string;
+  pandora_integration_status: string;
+}
+
+export interface StrategyValidationItem {
+  code: string;
+  name: string;
+  role: string;
+  action: string;
+  backtest: BacktestResult | null;
+  validation_state: string;
+  validation_label: string;
+  validation_score: number;
+  blockers: string[];
+  notes: string[];
+}
+
+export interface StrategyValidationReport {
+  generated_at: string;
+  days: number;
+  strategy: StrategySpec;
+  items: StrategyValidationItem[];
+  pass_count: number;
+  warning_count: number;
+  fail_count: number;
+  assumptions: string[];
+}
+
 
 export interface QuantUniverseAsset {
   asset_type: string;

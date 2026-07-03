@@ -27,6 +27,7 @@ import type {
   QuantSelfAuditReport,
   QuantValidationReport,
   RiskResponse,
+  StrategyValidationReport,
   TradeJournalResponse,
   TradeRecord,
   WebLoginResponse,
@@ -123,6 +124,8 @@ export const api = {
     requestJson<QuantSelfAuditReport>('/api/v1/quant-self-audit', { token, signal }),
   getQuantValidation: (token: string, signal?: AbortSignal) =>
     requestJson<QuantValidationReport>('/api/v1/quant-validation', { token, signal }),
+  getStrategyValidation: (token: string, signal?: AbortSignal) =>
+    requestJson<StrategyValidationReport>('/api/v1/strategy-validation', { token, signal }),
   getActionDecisions: (token: string, signal?: AbortSignal) =>
     requestJson<ActionDecisionResponse>('/api/v1/action-decisions', { token, signal }),
   getAccount: (token: string, signal?: AbortSignal) => requestJson<AccountState | null>('/api/v1/account', { token, signal }),

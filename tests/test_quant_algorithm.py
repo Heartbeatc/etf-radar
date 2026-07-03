@@ -5,11 +5,12 @@ from tempfile import TemporaryDirectory
 
 from app.core.config import Settings
 from app.core.runtime import Runtime, _direction_shift_reasons, _review_side_for_fixed_action
-from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse, Position, TradePlan
+from app.domain.models import AiTradeRiskReview, BacktestResult, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse, Position, TradePlan
 from app.services.ai_summary import CN_TZ, due_summary_kinds, summary_title
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.quant_decision import _etf_decisions, build_quant_decision_report
+from app.services.strategy_validation import _classify_backtest, build_current_strategy_spec, validation_universe_codes
 
 
 def etf(code: str, name: str, *, score: int = 76, mapping_score: int = 76, premium_pct: float = 0.2, amount: float = 300_000_000) -> DiscoveryEtfCandidate:
@@ -469,3 +470,41 @@ def test_direction_shift_event_uses_last_reviewed_state_and_ignores_small_noise(
 
     assert event is not None
     assert "第一方向切换" in event["reasons"]
+
+
+def test_strategy_spec_serializes_current_decision_universe():
+    leaders = [stock("600001", "测试龙头", role="leader", score=92)]
+    report = build_quant_decision_report(flow_report([direction("candidate", [], probability=66, low_buy=60, linked_stocks=leaders)]))
+
+    spec = build_current_strategy_spec(report)
+
+    assert spec.id == "a_share_direction_pullback_v1"
+    assert spec.lean_integration_status == "adapter_pending"
+    assert spec.pandora_integration_status == "not_integrated_execution_gateway"
+    assert "600001" in spec.universe
+    assert validation_universe_codes(report) == spec.universe
+
+
+def test_strategy_validation_never_passes_without_closed_trades():
+    result = BacktestResult(
+        code="600001",
+        name="测试龙头",
+        days=120,
+        bars_used=120,
+        trades=[],
+        trade_count=0,
+        win_rate_pct=None,
+        total_return_pct=0.0,
+        max_drawdown_pct=0.0,
+        exposure_days=0,
+        latest_signal=None,
+        assumptions=[],
+    )
+
+    state, label, score, blockers, notes = _classify_backtest(result)
+
+    assert state == "insufficient_signal"
+    assert label == "信号不足"
+    assert score < 75
+    assert blockers
+    assert notes

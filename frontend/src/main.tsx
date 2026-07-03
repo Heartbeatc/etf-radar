@@ -22,8 +22,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       locale={zhCN}
       theme={{
         token: {
-          borderRadius: 6,
-          colorPrimary: '#1677ff',
+          borderRadius: 8,
+          colorPrimary: '#0071e3',
           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
         }
       }}

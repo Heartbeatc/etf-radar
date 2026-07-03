@@ -1,16 +1,19 @@
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from app.adapters.store import Store
 from app.core.config import Settings
 from app.core.runtime import Runtime, _direction_shift_reasons, _review_side_for_fixed_action
-from app.domain.models import AiTradeRiskReview, BacktestResult, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse, Position, TradePlan
+from app.domain.models import AiTradeRiskReview, BacktestResult, DailyBar, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse, Position, TradePlan
 from app.services.ai_summary import CN_TZ, due_summary_kinds, summary_title
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
+from app.services.lean_adapter import export_lean_project
 from app.services.quant_decision import _etf_decisions, build_quant_decision_report
-from app.services.strategy_validation import _classify_backtest, build_current_strategy_spec, validation_universe_codes
+from app.services.strategy_validation import _classify_backtest, build_current_strategy_spec, build_strategy_validation_report, validation_universe_codes
 
 
 def etf(code: str, name: str, *, score: int = 76, mapping_score: int = 76, premium_pct: float = 0.2, amount: float = 300_000_000) -> DiscoveryEtfCandidate:
@@ -508,3 +511,41 @@ def test_strategy_validation_never_passes_without_closed_trades():
     assert score < 75
     assert blockers
     assert notes
+
+
+def test_lean_export_writes_project_artifacts():
+    leaders = [stock("600001", "测试龙头", role="leader", score=92)]
+    decision = build_quant_decision_report(flow_report([direction("candidate", [], probability=66, low_buy=60, linked_stocks=leaders)]))
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    bars = [
+        DailyBar(
+            date=(start + timedelta(days=index)).date().isoformat(),
+            open=10 + index * 0.05,
+            high=10.2 + index * 0.05,
+            low=9.8 + index * 0.05,
+            close=10.1 + index * 0.05,
+            volume=1_000_000 + index,
+            amount=20_000_000 + index * 1000,
+            turnover_pct=1.2,
+            change_pct=0.3,
+        )
+        for index in range(90)
+    ]
+
+    with TemporaryDirectory() as data_dir, TemporaryDirectory() as export_dir:
+        store = Store(str(Path(data_dir) / "test.sqlite3"))
+        store.save_daily_bars("600001", bars)
+        validation = build_strategy_validation_report(store, decision, days=80)
+
+        report = export_lean_project(store, validation, export_dir)
+
+        project_path = Path(report.project_path)
+        assert report.status == "exported_not_executed"
+        assert report.universe == ["600001"]
+        assert (project_path / "main.py").exists()
+        assert (project_path / "config.json").exists()
+        assert (project_path / "strategy_spec.json").exists()
+        assert (project_path / "strategy_signals.json").exists()
+        assert (Path(report.workspace_path) / "data" / "a_share_daily" / "600001.csv").exists()
+        assert "lean backtest" in report.lean_cli_command
+        assert report.files

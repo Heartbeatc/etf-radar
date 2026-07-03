@@ -525,6 +525,29 @@ class StrategyValidationReport(BaseModel):
     assumptions: list[str]
 
 
+class LeanExportFile(BaseModel):
+    path: str
+    purpose: str
+    bytes: int
+    sha256: str
+
+
+class LeanExportReport(BaseModel):
+    generated_at: datetime
+    status: str
+    project_name: str
+    workspace_path: str
+    project_path: str
+    lean_cli_command: str
+    universe: list[str]
+    start_date: str | None = None
+    end_date: str | None = None
+    signal_count: int
+    files: list[LeanExportFile]
+    warnings: list[str]
+    assumptions: list[str]
+
+
 class DiscoveryEtfCandidate(BaseModel):
     code: str
     name: str

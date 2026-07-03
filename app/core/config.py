@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     discovery_min_amount: float = Field(default=50_000_000, ge=1_000_000)
     discovery_max_directions: int = Field(default=8, ge=3, le=20)
     stock_focus_enabled: bool = True
+    lean_export_root: str = "/opt/etf-radar/data/lean_exports"
 
     event_corpus_enabled: bool = True
     event_corpus_source_urls: str = ""

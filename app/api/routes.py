@@ -23,6 +23,7 @@ from app.domain.models import (
     EventCorpusReport,
     IntegrationStatus,
     LatestResponse,
+    LeanExportReport,
     MarketFlowResponse,
     PoolRecommendationResponse,
     PortfolioSnapshotResponse,
@@ -53,6 +54,7 @@ from app.domain.models import (
 from app.services.action_decision import build_action_decision_report
 from app.services.backtest import run_backtest
 from app.services.data_quality import build_data_quality_report
+from app.services.lean_adapter import export_lean_project
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.portfolio import build_portfolio_snapshot
 from app.services.python_quant_stack import build_python_quant_stack_report
@@ -183,6 +185,16 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
 
     @app.get("/api/v1/strategy-validation", response_model=StrategyValidationReport, dependencies=PROTECTED)
     async def strategy_validation(days: int = Query(default=120, ge=60, le=500)) -> StrategyValidationReport:
+        return await _strategy_validation_report(days)
+
+
+    @app.post("/api/v1/lean/export", response_model=LeanExportReport, dependencies=PROTECTED)
+    async def lean_export(days: int = Query(default=120, ge=60, le=500)) -> LeanExportReport:
+        validation = await _strategy_validation_report(days)
+        return export_lean_project(runtime.store, validation, settings.lean_export_root)
+
+
+    async def _strategy_validation_report(days: int) -> StrategyValidationReport:
         market_flow_report = await runtime.market_flow()
         pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
         positions = runtime.store.positions()

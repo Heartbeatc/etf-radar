@@ -353,6 +353,9 @@ export interface QuantStockDecision {
   action: string;
   operation: string;
   score: number;
+  bottom_score: number;
+  bottom_state: string;
+  bottom_label: string;
   direction_label: string | null;
   board_name: string | null;
   verifier_role: string | null;
@@ -375,6 +378,7 @@ export interface QuantDecisionResponse {
   direction: QuantDirectionDecision;
   etfs: QuantEtfDecision[];
   stocks: QuantStockDecision[];
+  bottom_candidates: QuantStockDecision[];
   fixed_pool_actions: QuantEtfDecision[];
   ai_risk_reviews: AiTradeRiskReview[];
   ai_direction_summaries: AiSummaryItem[];

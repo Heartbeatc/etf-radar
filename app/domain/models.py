@@ -635,6 +635,9 @@ class QuantStockDecision(BaseModel):
     action: str
     operation: str
     score: int
+    bottom_score: int = 0
+    bottom_state: str = "not_ready"
+    bottom_label: str = "不抄底"
     direction_label: str | None = None
     board_name: str | None = None
     verifier_role: str | None = None
@@ -657,6 +660,7 @@ class QuantDecisionResponse(BaseModel):
     direction: QuantDirectionDecision
     etfs: list[QuantEtfDecision]
     stocks: list[QuantStockDecision]
+    bottom_candidates: list[QuantStockDecision] = Field(default_factory=list)
     fixed_pool_actions: list[QuantEtfDecision]
     ai_risk_reviews: list[AiTradeRiskReview] = Field(default_factory=list)
     ai_direction_summaries: list[AiSummaryItem] = Field(default_factory=list)

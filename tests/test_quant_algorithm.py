@@ -259,6 +259,26 @@ def test_stock_execution_contains_after_buy_exit_rules():
     assert "主力" in execution.capital_exit_signal
 
 
+def test_bottom_candidates_include_only_real_low_buy_setups():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    report = build_quant_decision_report(flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=leaders)]))
+
+    assert report.bottom_candidates
+    assert report.bottom_candidates[0].code == "002747"
+    assert report.bottom_candidates[0].bottom_state == "ready"
+    assert report.bottom_candidates[0].bottom_score >= 75
+    assert "抄底" in report.bottom_candidates[0].bottom_label
+
+
+def test_bottom_candidates_do_not_include_weak_verifier_stocks():
+    weak = [stock("002050", "三花智控", role="expansion", score=68, change_pct=2.5)]
+    report = build_quant_decision_report(flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=weak)]))
+
+    assert report.bottom_candidates == []
+    assert report.stocks[0].bottom_state == "watch"
+    assert report.stocks[0].bottom_score < 60
+
+
 def test_ai_trade_review_events_only_for_real_opportunities():
     leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
     buy_report = build_quant_decision_report(

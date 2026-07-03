@@ -11,7 +11,7 @@ interface QuantWorkbenchProps {
 
 export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, errorMessage }: QuantWorkbenchProps) {
   const direction = decision?.direction;
-  const stocks = pickStocks(decision?.stocks ?? []);
+  const stocks = pickStocks(decision?.bottom_candidates ?? []);
   const rows = stocks.length ? stocks : [null];
   const status = capitalStatus(direction);
 
@@ -67,7 +67,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td>最近方向</td>
             <td>主力在不在</td>
             <td>阶段</td>
-            <td>标的</td>
+            <td>抄底候选</td>
             <td>现价</td>
             <td>低吸区</td>
             <td>触发信号</td>
@@ -81,7 +81,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
               <td>{index === 0 ? formatDirection(direction) : ''}</td>
               <td>{index === 0 ? formatCapital(status, direction) : ''}</td>
               <td>{index === 0 ? formatPhase(direction) : ''}</td>
-              <td>{stock ? formatStock(stock) : '暂无龙头/二龙头样本'}</td>
+              <td>{stock ? formatStock(stock) : '暂无可抄底股票'}</td>
               <td>{stock ? formatPriceCell(stock) : '-'}</td>
               <td>{stock ? formatZone(stock) : '-'}</td>
               <td>{stock?.execution?.trigger_signal ?? '-'}</td>
@@ -123,7 +123,7 @@ function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
   };
   return [...items]
     .filter((item) => item.code && item.name)
-    .sort((a, b) => (actionRank[a.action] ?? 50) - (actionRank[b.action] ?? 50) || b.score - a.score)
+    .sort((a, b) => (actionRank[a.action] ?? 50) - (actionRank[b.action] ?? 50) || b.bottom_score - a.bottom_score || b.score - a.score)
     .slice(0, 6);
 }
 
@@ -158,8 +158,8 @@ function formatStock(item: QuantStockDecision) {
   const board = item.board_name ? ` / ${item.board_name}` : '';
   return (
     <>
-      <strong>{stockRoleLabel(item.verifier_role)} {item.code} {item.name}</strong>
-      <span>分 {formatScore(item.score)}{board}</span>
+      <strong>{item.bottom_label} {item.code} {item.name}</strong>
+      <span>{stockRoleLabel(item.verifier_role)} / 抄底 {formatScore(item.bottom_score)} / 强度 {formatScore(item.score)}{board}</span>
     </>
   );
 }

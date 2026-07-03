@@ -29,6 +29,7 @@ def build_quant_decision_report(
     direction_decision = _direction_decision(top_direction)
     etfs = _etf_decisions(pool, actions) if pool is not None and actions is not None else []
     stocks = _stock_decisions(top_direction)
+    bottom_candidates = _bottom_candidates(stocks)
     fixed_actions = [_fixed_action_decision(item) for item in actions.items] if actions is not None else []
     conclusion = _conclusion(direction_decision, stocks, fixed_actions)
     warnings = [*market_flow.warnings[:4]]
@@ -43,6 +44,7 @@ def build_quant_decision_report(
         direction=direction_decision,
         etfs=etfs,
         stocks=stocks,
+        bottom_candidates=bottom_candidates,
         fixed_pool_actions=fixed_actions,
         warnings=_dedupe(warnings)[:8],
         assumptions=[
@@ -124,6 +126,7 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
         base_action, operation, risks = _stock_action(direction, stock)
         execution = _stock_execution_plan(direction, stock, base_action, risks)
         action = _stock_final_action(base_action, execution)
+        bottom_score, bottom_state, bottom_label = _bottom_profile(direction, stock, execution, action)
         result.append(
             QuantStockDecision(
                 code=stock.code,
@@ -131,6 +134,9 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
                 action=action,
                 operation=operation,
                 score=stock.score,
+                bottom_score=bottom_score,
+                bottom_state=bottom_state,
+                bottom_label=bottom_label,
                 direction_label=direction.direction_label,
                 board_name=stock.board_name,
                 verifier_role=stock.verifier_role,
@@ -434,6 +440,79 @@ def _stock_final_action(base_action: str, execution: QuantStockExecutionPlan) ->
     return base_action
 
 
+def _bottom_candidates(stocks: list[QuantStockDecision]) -> list[QuantStockDecision]:
+    rank = {"ready": 0, "wait_acceptance": 1, "wait_price": 2}
+    candidates = [
+        item
+        for item in stocks
+        if item.bottom_state in rank and item.bottom_score >= 60
+    ]
+    candidates.sort(key=lambda item: (rank.get(item.bottom_state, 9), -item.bottom_score, -item.score))
+    return candidates[:6]
+
+
+def _bottom_profile(
+    direction: MarketDirection,
+    stock: MarketStockCandidate,
+    execution: QuantStockExecutionPlan,
+    action: str,
+) -> tuple[int, str, str]:
+    statuses = {condition.key: condition.status for condition in execution.conditions}
+    score = 0.0
+    score += _condition_points(statuses.get("direction_phase"), 22)
+    score += _condition_points(statuses.get("price_zone"), 22)
+    score += _condition_points(statuses.get("capital_acceptance"), 22)
+    score += _condition_points(statuses.get("heat_control"), 14)
+    score += _condition_points(statuses.get("volume_shape"), 8)
+    score += _condition_points(statuses.get("stock_quality"), 12)
+
+    change = stock.change_pct if stock.change_pct is not None else 0.0
+    inflow_pct = stock.main_net_inflow_pct if stock.main_net_inflow_pct is not None else 0.0
+    volume_ratio = stock.volume_ratio if stock.volume_ratio is not None else 0.0
+    hard_block = action in {"AVOID", "DO_NOT_CHASE", "VERIFY_ONLY"} or execution.decision_state == "no_buy"
+    if hard_block:
+        score -= 30
+    if direction.state in {"weakening", "weak_direction"}:
+        score -= 40
+    if inflow_pct < -5:
+        score -= 18
+    if change <= -5:
+        score -= 14
+    if volume_ratio > 6:
+        score -= 8
+
+    price_passed = statuses.get("price_zone") == "passed"
+    stock_passed = statuses.get("stock_quality") == "passed"
+    capital_failed = statuses.get("capital_acceptance") == "failed"
+    score = _clamp_score(round(score))
+
+    if hard_block or capital_failed:
+        return min(score, 45), "avoid", "不抄底"
+    if not stock_passed:
+        return min(score, 58), "watch", "只验证不抄底"
+    if execution.decision_state == "buy_probe" and score >= 75:
+        return score, "ready", "可小仓抄底"
+    if price_passed and score >= 60:
+        return score, "wait_acceptance", "价到等承接"
+    if score >= 60:
+        return score, "wait_price", "等低吸区"
+    if score >= 50:
+        return score, "watch", "观察不抄底"
+    return score, "avoid", "不抄底"
+
+
+def _condition_points(status: str | None, max_points: int) -> float:
+    if status == "passed":
+        return float(max_points)
+    if status == "pending":
+        return max_points * 0.45
+    return 0.0
+
+
+def _clamp_score(value: int) -> int:
+    return max(0, min(100, value))
+
+
 def _stock_price_levels(stock: MarketStockCandidate) -> tuple[float | None, float | None, float | None, float | None, float | None]:
     price = stock.price
     if price is None or price <= 0:
@@ -575,8 +654,8 @@ def _fixed_operation(item: ActionDecisionItem) -> str:
 
 def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecision], fixed_actions: list[QuantEtfDecision]) -> str:
     sell = [item for item in fixed_actions if item.action.startswith("SELL") or item.action == "REDUCE_OR_HOLD_TIGHT"]
-    buy_probe = [item for item in stocks if item.action == "BUY_PROBE"]
-    wait_buy = [item for item in stocks if item.action in {"WAIT_BUY_ZONE", "WAIT_CONFIRMATION"}]
+    buy_probe = [item for item in stocks if item.bottom_state == "ready"]
+    wait_buy = [item for item in stocks if item.bottom_state in {"wait_acceptance", "wait_price"}]
     hot = [item for item in stocks if item.action in {"WAIT_PULLBACK", "DO_NOT_CHASE", "OBSERVE_NEXT_DAY"}]
     if sell:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓优先按卖出/减仓信号处理。"
@@ -589,7 +668,7 @@ def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecisi
     if hot:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；方向龙头/二龙头偏热或需次日承接，当前不追。"
     if stocks:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有龙头/二龙头样本，但当前只观察验证。"
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有龙头/二龙头样本，但当前没有抄底候选，只观察验证。"
     return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前没有可用A股候选。"
 
 

@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     ai_summary_daily_call_limit: int = Field(default=4, ge=0, le=20)
     ai_summary_force_cooldown_seconds: int = Field(default=1800, ge=300, le=14_400)
     ai_summary_check_interval_seconds: int = Field(default=60, ge=30, le=600)
+    ai_trade_review_daily_call_limit: int = Field(default=3, ge=0, le=20)
+    ai_trade_review_cooldown_seconds: int = Field(default=7200, ge=300, le=28_800)
+    ai_trade_review_max_per_run: int = Field(default=2, ge=1, le=6)
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"

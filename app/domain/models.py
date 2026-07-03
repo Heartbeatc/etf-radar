@@ -135,6 +135,27 @@ class AiSummaryItem(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class AiTradeRiskReview(BaseModel):
+    review_key: str
+    code: str
+    name: str
+    side: str
+    action: str
+    trading_date: str
+    generated_at: datetime
+    model: str
+    status: str = "ok"
+    source: str = "deepseek"
+    risk_level: str = "unknown"
+    conclusion: str
+    risk_points: list[str] = Field(default_factory=list)
+    invalidation: list[str] = Field(default_factory=list)
+    suggested_next_check: str = ""
+    ai_should_block: bool = False
+    error: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 class AiStatus(BaseModel):
     enabled: bool
     configured: bool
@@ -143,6 +164,10 @@ class AiStatus(BaseModel):
     calls_used_today: int
     force_cooldown_seconds: int
     check_interval_seconds: int
+    trade_review_daily_call_limit: int
+    trade_review_calls_used_today: int
+    trade_review_cooldown_seconds: int
+    trade_review_max_per_run: int
     windows: list[dict[str, str]]
 
 
@@ -570,6 +595,7 @@ class QuantEtfDecision(BaseModel):
     exit_price: float | None = None
     reasons: list[str]
     risk_flags: list[str]
+    ai_risk_review: AiTradeRiskReview | None = None
 
 
 class QuantStockExecutionCondition(BaseModel):
@@ -600,6 +626,7 @@ class QuantStockExecutionPlan(BaseModel):
     position_plan: str
     conditions: list[QuantStockExecutionCondition] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
+    ai_risk_review: AiTradeRiskReview | None = None
 
 
 class QuantStockDecision(BaseModel):
@@ -631,6 +658,7 @@ class QuantDecisionResponse(BaseModel):
     etfs: list[QuantEtfDecision]
     stocks: list[QuantStockDecision]
     fixed_pool_actions: list[QuantEtfDecision]
+    ai_risk_reviews: list[AiTradeRiskReview] = Field(default_factory=list)
     warnings: list[str]
     assumptions: list[str]
 

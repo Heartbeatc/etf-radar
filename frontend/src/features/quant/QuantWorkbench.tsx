@@ -204,8 +204,23 @@ function formatActionCell(item: QuantStockDecision) {
       <strong className={`action-${execution?.decision_state ?? 'monitor'}`}>{execution?.decision_label ?? actionLabel(item.action)}</strong>
       <span>{execution?.decision_reason ?? item.operation}</span>
       {execution?.position_plan ? <span>{execution.position_plan}</span> : null}
+      {execution?.ai_risk_review ? (
+        <span className={`ai-risk ai-risk-${execution.ai_risk_review.risk_level}`}>
+          AI风险 {riskLevelLabel(execution.ai_risk_review.risk_level)}：{execution.ai_risk_review.conclusion}
+        </span>
+      ) : null}
     </>
   );
+}
+
+function riskLevelLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    low: '低',
+    medium: '中',
+    high: '高',
+    unknown: '未知'
+  };
+  return value ? map[value] ?? value : '未知';
 }
 
 function stockRoleLabel(value: string | null | undefined): string {

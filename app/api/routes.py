@@ -140,7 +140,10 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
     @app.get("/api/v1/quant-decision", response_model=QuantDecisionResponse, dependencies=PROTECTED)
     async def quant_decision() -> QuantDecisionResponse:
         market_flow_report = await runtime.market_flow()
-        return build_quant_decision_report(market_flow_report)
+        pool_report = build_pool_recommendation_report(settings, market_flow_report, runtime.store.latest_snapshots())
+        action_report = build_action_decision_report(await runtime.build_rule_plans_for_pool(pool_report), runtime.store.positions())
+        report = build_quant_decision_report(market_flow_report, pool_report, action_report)
+        return await runtime.attach_ai_trade_reviews(report)
 
 
     @app.get("/api/v1/quant-framework", response_model=QuantFrameworkResponse, dependencies=PROTECTED)

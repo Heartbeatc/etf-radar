@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from app.domain.models import AlertEvent, AiSummaryItem, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
+from app.domain.models import AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan
 
 
 class Store:
@@ -181,6 +181,27 @@ class Store:
                     error text
                 );
                 create index if not exists idx_ai_call_log_date on ai_call_log(trading_date, called_at desc);
+                create index if not exists idx_ai_call_log_purpose_date on ai_call_log(purpose, trading_date, called_at desc);
+
+                create table if not exists ai_trade_reviews (
+                    id integer primary key autoincrement,
+                    review_key text not null unique,
+                    code text not null,
+                    name text not null,
+                    side text not null,
+                    action text not null,
+                    trading_date text not null,
+                    generated_at text not null,
+                    model text not null,
+                    status text not null,
+                    source text not null,
+                    risk_level text not null,
+                    conclusion text not null,
+                    error text,
+                    payload text not null
+                );
+                create index if not exists idx_ai_trade_reviews_date on ai_trade_reviews(trading_date, generated_at desc);
+                create index if not exists idx_ai_trade_reviews_code on ai_trade_reviews(code, generated_at desc);
                 """
             )
             conn.execute(
@@ -585,10 +606,69 @@ class Store:
                 "delete from ai_call_log where id not in (select id from ai_call_log order by called_at desc limit 1000)"
             )
 
-    def ai_call_count(self, trading_date: str) -> int:
+    def ai_call_count(self, trading_date: str, purpose: str | None = None) -> int:
         with self._connect() as conn:
-            row = conn.execute("select count(*) as count from ai_call_log where trading_date = ?", (trading_date,)).fetchone()
+            if purpose:
+                row = conn.execute(
+                    "select count(*) as count from ai_call_log where trading_date = ? and purpose = ?",
+                    (trading_date, purpose),
+                ).fetchone()
+            else:
+                row = conn.execute("select count(*) as count from ai_call_log where trading_date = ?", (trading_date,)).fetchone()
         return int(row["count"] if row else 0)
+
+    def save_ai_trade_review(self, review: AiTradeRiskReview) -> AiTradeRiskReview:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into ai_trade_reviews(
+                    review_key, code, name, side, action, trading_date, generated_at, model, status, source,
+                    risk_level, conclusion, error, payload
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(review_key) do update set
+                    generated_at = excluded.generated_at,
+                    model = excluded.model,
+                    status = excluded.status,
+                    source = excluded.source,
+                    risk_level = excluded.risk_level,
+                    conclusion = excluded.conclusion,
+                    error = excluded.error,
+                    payload = excluded.payload
+                """,
+                (
+                    review.review_key,
+                    review.code,
+                    review.name,
+                    review.side,
+                    review.action,
+                    review.trading_date,
+                    review.generated_at.isoformat(),
+                    review.model,
+                    review.status,
+                    review.source,
+                    review.risk_level,
+                    review.conclusion,
+                    review.error,
+                    review.model_dump_json(),
+                ),
+            )
+            conn.execute(
+                "delete from ai_trade_reviews where id not in (select id from ai_trade_reviews order by generated_at desc limit 1000)"
+            )
+        return review
+
+    def ai_trade_review_for(self, review_key: str) -> AiTradeRiskReview | None:
+        with self._connect() as conn:
+            row = conn.execute("select payload from ai_trade_reviews where review_key = ?", (review_key,)).fetchone()
+        if not row:
+            return None
+        return AiTradeRiskReview.model_validate_json(row["payload"])
+
+    def latest_ai_trade_reviews(self, limit: int = 20) -> list[AiTradeRiskReview]:
+        limit = max(1, min(limit, 100))
+        with self._connect() as conn:
+            rows = conn.execute("select payload from ai_trade_reviews order by generated_at desc limit ?", (limit,)).fetchall()
+        return [AiTradeRiskReview.model_validate_json(row["payload"]) for row in rows]
 
     def save_source_status(self, statuses: list[SourceStatus]) -> None:
         checked_at = datetime.now(timezone.utc).isoformat()

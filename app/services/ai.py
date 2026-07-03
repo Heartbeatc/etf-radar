@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from time import monotonic
 
 import httpx
 
 from app.core.config import Settings
-from app.domain.models import TradePlan
+from app.domain.models import AiTradeRiskReview, TradePlan
 
 
 @dataclass
@@ -89,6 +90,59 @@ class AIAnalyst:
         except Exception:
             return _fallback_market_summary(kind, context)
 
+    async def review_trade_opportunity(self, event: dict) -> AiTradeRiskReview:
+        if not self.settings.deepseek_api_key:
+            return _fallback_trade_review(
+                event,
+                self.settings.deepseek_model,
+                status="skipped",
+                source="rules_fallback",
+                error="DeepSeek API key is not configured",
+            )
+        payload = {
+            "model": self.settings.deepseek_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是A股量化系统的交易风控复核员，只基于输入的规则信号做反方风险预判。"
+                        "规则引擎已经先判断出买入或卖出机会；你不能创造新的标的，不能承诺收益，"
+                        "不能输出绝对化命令。必须优先识别：资金撤退、追高、破位、数据不足、方向退潮。"
+                        "返回严格JSON，字段：risk_level(low/medium/high), conclusion, risk_points, invalidation, "
+                        "suggested_next_check, ai_should_block。conclusion不超过90个中文字符；risk_points和invalidation各不超过3条。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({"trade_opportunity": event}, ensure_ascii=False),
+                },
+            ],
+            "temperature": 0.05,
+            "max_tokens": 360,
+            "response_format": {"type": "json_object"},
+        }
+        endpoint = _chat_endpoint(self.settings.deepseek_base_url)
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.deepseek_timeout_seconds) as client:
+                response = await client.post(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {self.settings.deepseek_api_key}"},
+                    json=payload,
+                )
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+                parsed = json.loads(content)
+                return _trade_review_from_payload(event, parsed, self.settings.deepseek_model)
+        except Exception as exc:
+            return _fallback_trade_review(
+                event,
+                self.settings.deepseek_model,
+                status="error",
+                source="rules_fallback",
+                error=str(exc)[:300],
+            )
+
+
     async def _request_summaries(self, plans: list[TradePlan]) -> dict[str, str]:
         payload = {
             "model": self.settings.deepseek_model,
@@ -145,6 +199,105 @@ class AIAnalyst:
                 return {str(key): str(value) for key, value in parsed.items()}
         except Exception:
             return {plan.code: _fallback_summary(plan) for plan in plans}
+
+
+def _trade_review_from_payload(event: dict, parsed: dict, model: str) -> AiTradeRiskReview:
+    return AiTradeRiskReview(
+        review_key=str(event.get("review_key", "")),
+        code=str(event.get("code", "")),
+        name=str(event.get("name", "")),
+        side=str(event.get("side", "")),
+        action=str(event.get("action", "")),
+        trading_date=str(event.get("trading_date", "")),
+        generated_at=datetime.now(timezone.utc),
+        model=model,
+        status="ok",
+        source="deepseek",
+        risk_level=_risk_level(parsed.get("risk_level")),
+        conclusion=_short_text(parsed.get("conclusion"), 120) or "AI复核未给出明确结论，继续以规则引擎为准。",
+        risk_points=_text_list(parsed.get("risk_points"), limit=3),
+        invalidation=_text_list(parsed.get("invalidation"), limit=3),
+        suggested_next_check=_short_text(parsed.get("suggested_next_check"), 80),
+        ai_should_block=bool(parsed.get("ai_should_block")),
+        payload={"event": event, "raw": parsed},
+    )
+
+
+def _fallback_trade_review(
+    event: dict,
+    model: str,
+    status: str = "ok",
+    source: str = "rules_fallback",
+    error: str | None = None,
+) -> AiTradeRiskReview:
+    side = str(event.get("side", "")).upper()
+    action = str(event.get("action", ""))
+    risk_flags = _text_list(event.get("risk_flags"), limit=3)
+    if side == "BUY":
+        conclusion = "规则买点出现，但只能小仓试错；资金转弱或跌破防守价必须撤退。"
+        risk_points = risk_flags or ["买点依赖资金承接延续", "价格进入低吸区不等于趋势确认"]
+        invalidation = _text_list(event.get("invalidation"), limit=3) or ["主力净流入转负", "跌破防守价", "方向跌出前排"]
+        next_check = "复核资金承接和低吸区下沿"
+        risk_level = "medium"
+    elif side == "SELL":
+        conclusion = "规则卖出/减仓信号出现，优先保护本金和利润，不等待AI反向确认。"
+        risk_points = risk_flags or ["持仓风险已经抬升", "趋势或止盈条件触发"]
+        invalidation = _text_list(event.get("invalidation"), limit=3) or ["风险分继续升高", "跌破有效离场价"]
+        next_check = "复核防守价和风险分"
+        risk_level = "high" if action in {"SELL_ALL", "REDUCE_OR_HOLD_TIGHT"} else "medium"
+    else:
+        conclusion = "未识别为买入或卖出机会，不调用AI交易复核。"
+        risk_points = risk_flags
+        invalidation = _text_list(event.get("invalidation"), limit=3)
+        next_check = "等待规则信号"
+        risk_level = "unknown"
+    return AiTradeRiskReview(
+        review_key=str(event.get("review_key", "")),
+        code=str(event.get("code", "")),
+        name=str(event.get("name", "")),
+        side=side,
+        action=action,
+        trading_date=str(event.get("trading_date", "")),
+        generated_at=datetime.now(timezone.utc),
+        model=model,
+        status=status,
+        source=source,
+        risk_level=risk_level,
+        conclusion=conclusion,
+        risk_points=risk_points,
+        invalidation=invalidation,
+        suggested_next_check=next_check,
+        ai_should_block=False,
+        error=error,
+        payload={"event": event},
+    )
+
+
+def _risk_level(value: object) -> str:
+    text = str(value or "unknown").strip().lower()
+    return text if text in {"low", "medium", "high", "unknown"} else "unknown"
+
+
+def _text_list(value: object, limit: int) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+    result: list[str] = []
+    for item in items:
+        text = _short_text(item, 90)
+        if text:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _short_text(value: object, limit: int) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    return text[:limit]
 
 
 def _chat_endpoint(base_url: str) -> str:

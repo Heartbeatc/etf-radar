@@ -1,7 +1,10 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
+from tempfile import TemporaryDirectory
 
 from app.core.config import Settings
-from app.domain.models import DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
+from app.core.runtime import Runtime, _review_side_for_fixed_action
+from app.domain.models import AiTradeRiskReview, DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
 from app.services.market_flow import _apply_probability_evidence_cap, _history_by_direction, _seven_day_direction_score
 from app.services.pool_recommendation import build_pool_recommendation_report
 from app.services.quant_decision import _etf_decisions, build_quant_decision_report
@@ -253,3 +256,75 @@ def test_stock_execution_contains_after_buy_exit_rules():
     assert "防守价" in execution.hard_exit_signal
     assert "资金" in execution.after_buy_plan
     assert "主力" in execution.capital_exit_signal
+
+
+def test_ai_trade_review_events_only_for_real_opportunities():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    buy_report = build_quant_decision_report(
+        flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=leaders)])
+    )
+    wait_report = build_quant_decision_report(
+        flow_report([direction("candidate", [], probability=66, low_buy=58, linked_stocks=leaders)])
+    )
+
+    with TemporaryDirectory() as tmpdir:
+        runtime = Runtime(Settings(database_path=f"{tmpdir}/radar.sqlite3", api_polling_enabled=False, ai_enabled=False))
+        buy_events = runtime._trade_review_events(buy_report)
+        wait_events = runtime._trade_review_events(wait_report)
+
+    assert buy_events
+    assert buy_events[0]["side"] == "BUY"
+    assert buy_events[0]["action"] == "BUY_PROBE"
+    assert wait_events == []
+    assert _review_side_for_fixed_action("SELL_ALL") == "SELL"
+    assert _review_side_for_fixed_action("REDUCE_OR_HOLD_TIGHT") == "SELL"
+    assert _review_side_for_fixed_action("WAIT") is None
+
+
+def test_ai_trade_review_uses_cache_for_same_opportunity():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    report = build_quant_decision_report(
+        flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=leaders)])
+    )
+
+    async def run_check() -> None:
+        with TemporaryDirectory() as tmpdir:
+            runtime = Runtime(
+                Settings(
+                    database_path=f"{tmpdir}/radar.sqlite3",
+                    api_polling_enabled=False,
+                    ai_enabled=True,
+                    deepseek_api_key="test-key",
+                    ai_trade_review_daily_call_limit=3,
+                    ai_trade_review_cooldown_seconds=7200,
+                )
+            )
+            calls = 0
+
+            class FakeAI:
+                async def review_trade_opportunity(self, event):
+                    nonlocal calls
+                    calls += 1
+                    return AiTradeRiskReview(
+                        review_key=event["review_key"],
+                        code=event["code"],
+                        name=event["name"],
+                        side=event["side"],
+                        action=event["action"],
+                        trading_date=event["trading_date"],
+                        generated_at=datetime.now(timezone.utc),
+                        model="fake",
+                        risk_level="medium",
+                        conclusion="测试AI复核",
+                    )
+
+            runtime.ai = FakeAI()
+            first = await runtime.attach_ai_trade_reviews(report.model_copy(deep=True))
+            second = await runtime.attach_ai_trade_reviews(report.model_copy(deep=True))
+
+            assert calls == 1
+            assert runtime.store.ai_call_count(first.ai_risk_reviews[0].trading_date, purpose="trade_risk_review") == 1
+            assert first.stocks[0].execution.ai_risk_review is not None
+            assert second.stocks[0].execution.ai_risk_review is not None
+
+    asyncio.run(run_check())

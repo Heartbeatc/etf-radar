@@ -16,7 +16,7 @@ from app.adapters.infra import PostgresInfra, RedisInfra
 from app.adapters.store import Store
 from app.core.config import Settings
 from app.core.market import market_status
-from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, DiscoveryResponse, EventCorpusReport, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, SourceStatus, TradePlan
+from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, AiTradeRiskReview, DiscoveryResponse, EventCorpusReport, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, QuantDecisionResponse, SourceStatus, TradePlan
 from app.services.ai import AIAnalyst
 from app.services.ai_summary import build_ai_context, due_summary_kinds, make_summary_item, summary_title, summary_windows_payload, trading_date
 from app.services.alerts import AlertManager
@@ -349,9 +349,13 @@ class Runtime:
             configured=bool(self.settings.deepseek_api_key),
             model=self.settings.deepseek_model,
             daily_call_limit=self.settings.ai_summary_daily_call_limit,
-            calls_used_today=self.store.ai_call_count(date),
+            calls_used_today=self.store.ai_call_count(date, purpose="market_summary"),
             force_cooldown_seconds=self.settings.ai_summary_force_cooldown_seconds,
             check_interval_seconds=self.settings.ai_summary_check_interval_seconds,
+            trade_review_daily_call_limit=self.settings.ai_trade_review_daily_call_limit,
+            trade_review_calls_used_today=self.store.ai_call_count(date, purpose="trade_risk_review"),
+            trade_review_cooldown_seconds=self.settings.ai_trade_review_cooldown_seconds,
+            trade_review_max_per_run=self.settings.ai_trade_review_max_per_run,
             windows=summary_windows_payload(),
         )
 
@@ -393,7 +397,7 @@ class Runtime:
             age = (datetime.now(timezone.utc) - existing.generated_at).total_seconds()
             if age < self.settings.ai_summary_force_cooldown_seconds:
                 return existing
-        if self.store.ai_call_count(date) >= self.settings.ai_summary_daily_call_limit:
+        if self.store.ai_call_count(date, purpose="market_summary") >= self.settings.ai_summary_daily_call_limit:
             return existing
 
         plans = self.build_rule_plans()
@@ -430,6 +434,131 @@ class Runtime:
                 payload={"context": context},
             )
             return self.store.save_ai_summary(item)
+
+    async def attach_ai_trade_reviews(self, report: QuantDecisionResponse) -> QuantDecisionResponse:
+        events = self._trade_review_events(report)[: self.settings.ai_trade_review_max_per_run]
+        if not events:
+            return report
+        if not self.ai_enabled() or not self.settings.deepseek_api_key:
+            return report
+        if self.settings.ai_trade_review_daily_call_limit <= 0:
+            return report
+
+        reviews: list[AiTradeRiskReview] = []
+        date = trading_date()
+        now = datetime.now(timezone.utc)
+        for event in events:
+            review_key = str(event["review_key"])
+            existing = self.store.ai_trade_review_for(review_key)
+            if existing is not None:
+                age = (now - existing.generated_at).total_seconds()
+                if age < self.settings.ai_trade_review_cooldown_seconds:
+                    self._attach_ai_trade_review(report, existing)
+                    reviews.append(existing)
+                    continue
+            calls_used = self.store.ai_call_count(date, purpose="trade_risk_review")
+            if calls_used >= self.settings.ai_trade_review_daily_call_limit:
+                if existing is not None:
+                    self._attach_ai_trade_review(report, existing)
+                    reviews.append(existing)
+                continue
+            review = await self.ai.review_trade_opportunity(event)
+            self.store.log_ai_call(
+                "trade_risk_review",
+                str(event.get("kind", event.get("side", "trade"))),
+                date,
+                review.status,
+                error=review.error,
+            )
+            saved = self.store.save_ai_trade_review(review)
+            self._attach_ai_trade_review(report, saved)
+            reviews.append(saved)
+
+        report.ai_risk_reviews = _unique_reviews([*report.ai_risk_reviews, *reviews])
+        return report
+
+    def _trade_review_events(self, report: QuantDecisionResponse) -> list[dict]:
+        date = trading_date()
+        events: list[dict] = []
+        direction = report.direction
+        for item in report.stocks:
+            execution = item.execution
+            if not execution or item.action != "BUY_PROBE" or execution.decision_state != "buy_probe":
+                continue
+            events.append(
+                {
+                    "kind": "stock_buy",
+                    "review_key": f"{date}:stock:{item.code}:BUY:{item.action}:{direction.direction_key or '-'}",
+                    "code": item.code,
+                    "name": item.name,
+                    "side": "BUY",
+                    "action": item.action,
+                    "trading_date": date,
+                    "direction": {
+                        "label": direction.direction_label,
+                        "phase": direction.phase_label,
+                        "confidence": direction.confidence,
+                        "mainline_probability": direction.mainline_probability,
+                        "seven_day_score": direction.seven_day_score,
+                        "residency_score": direction.residency_score,
+                        "retention_score": direction.retention_score,
+                    },
+                    "price": item.price,
+                    "change_pct": item.change_pct,
+                    "main_net_inflow_pct": item.main_net_inflow_pct,
+                    "volume_ratio": item.volume_ratio,
+                    "score": item.score,
+                    "buy_zone": [execution.buy_zone_low, execution.buy_zone_high],
+                    "avoid_above": execution.avoid_above,
+                    "stop_price": execution.stop_price,
+                    "take_profit_price": execution.take_profit_price,
+                    "trigger_signal": execution.trigger_signal,
+                    "decision_reason": execution.decision_reason,
+                    "invalidation": [execution.invalidation_signal, execution.reduce_signal, execution.hard_exit_signal],
+                    "conditions": [condition.model_dump(mode="json") for condition in execution.conditions],
+                    "risk_flags": item.risk_flags[:6],
+                    "blockers": execution.blockers[:6],
+                }
+            )
+
+        for item in report.fixed_pool_actions:
+            side = _review_side_for_fixed_action(item.action)
+            if side is None:
+                continue
+            events.append(
+                {
+                    "kind": "etf_" + side.lower(),
+                    "review_key": f"{date}:etf:{item.code}:{side}:{item.action}",
+                    "code": item.code,
+                    "name": item.name,
+                    "side": side,
+                    "action": item.action,
+                    "trading_date": date,
+                    "direction": {"label": item.direction_label},
+                    "price": item.price,
+                    "has_position": item.has_position,
+                    "floating_profit_pct": item.floating_profit_pct,
+                    "suggested_position_pct": item.suggested_position_pct,
+                    "buy_zone": [item.buy_zone_low, item.buy_zone_high],
+                    "avoid_above": item.avoid_above,
+                    "stop_price": item.exit_price,
+                    "take_profit_price": item.take_profit_price,
+                    "trigger_signal": item.operation,
+                    "invalidation": item.risk_flags[:3],
+                    "risk_flags": item.risk_flags[:6],
+                    "reasons": item.reasons[:6],
+                }
+            )
+        return events
+
+    def _attach_ai_trade_review(self, report: QuantDecisionResponse, review: AiTradeRiskReview) -> None:
+        for stock in report.stocks:
+            if stock.code == review.code and stock.execution is not None:
+                stock.execution.ai_risk_review = review
+        for item in [*report.etfs, *report.fixed_pool_actions]:
+            if item.code == review.code:
+                item.ai_risk_review = review
+
 
     def source_status(self) -> list[SourceStatus]:
         return source_status_for(self.settings, self.store.latest_snapshots(), codes=self.monitor_codes(), roles=self.roles())
@@ -563,4 +692,23 @@ def _unique_codes(codes) -> list[str]:
             continue
         result.append(code)
         seen.add(code)
+    return result
+
+
+def _review_side_for_fixed_action(action: str) -> str | None:
+    if action == "BUY_FIRST_BATCH":
+        return "BUY"
+    if action in {"SELL_ALL", "SELL_PARTIAL_50", "SELL_PARTIAL_20_30", "REDUCE_OR_HOLD_TIGHT"}:
+        return "SELL"
+    return None
+
+
+def _unique_reviews(items: list[AiTradeRiskReview]) -> list[AiTradeRiskReview]:
+    result: list[AiTradeRiskReview] = []
+    seen: set[str] = set()
+    for item in items:
+        if item.review_key in seen:
+            continue
+        result.append(item)
+        seen.add(item.review_key)
     return result

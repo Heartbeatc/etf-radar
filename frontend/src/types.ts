@@ -313,6 +313,7 @@ export interface QuantEtfDecision {
   exit_price: number | null;
   reasons: string[];
   risk_flags: string[];
+  ai_risk_review: AiTradeRiskReview | null;
 }
 
 export interface QuantStockExecutionCondition {
@@ -343,6 +344,7 @@ export interface QuantStockExecutionPlan {
   position_plan: string;
   conditions: QuantStockExecutionCondition[];
   blockers: string[];
+  ai_risk_review: AiTradeRiskReview | null;
 }
 
 export interface QuantStockDecision {
@@ -374,6 +376,7 @@ export interface QuantDecisionResponse {
   etfs: QuantEtfDecision[];
   stocks: QuantStockDecision[];
   fixed_pool_actions: QuantEtfDecision[];
+  ai_risk_reviews: AiTradeRiskReview[];
   warnings: string[];
   assumptions: string[];
 }
@@ -661,6 +664,27 @@ export interface IntegrationStatus {
 
 export type AiSummaryKind = 'opening_auction' | 'midday' | 'closing';
 
+export interface AiTradeRiskReview {
+  review_key: string;
+  code: string;
+  name: string;
+  side: string;
+  action: string;
+  trading_date: string;
+  generated_at: string;
+  model: string;
+  status: string;
+  source: string;
+  risk_level: string;
+  conclusion: string;
+  risk_points: string[];
+  invalidation: string[];
+  suggested_next_check: string;
+  ai_should_block: boolean;
+  error: string | null;
+  payload: Record<string, unknown>;
+}
+
 export interface AiStatus {
   enabled: boolean;
   configured: boolean;
@@ -669,6 +693,10 @@ export interface AiStatus {
   calls_used_today: number;
   force_cooldown_seconds: number;
   check_interval_seconds: number;
+  trade_review_daily_call_limit: number;
+  trade_review_calls_used_today: number;
+  trade_review_cooldown_seconds: number;
+  trade_review_max_per_run: number;
   windows: Array<{ kind: AiSummaryKind | string; title: string; start: string; end: string }>;
 }
 

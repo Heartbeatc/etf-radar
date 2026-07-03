@@ -406,7 +406,16 @@ export interface QuantHoldingDecision {
 
 export interface QuantDecisionResponse {
   generated_at: string;
+  server_time: string | null;
+  data_time: string | null;
+  data_age_seconds: number | null;
   market_status: string;
+  market_status_label: string;
+  is_trading_day: boolean;
+  should_poll_realtime: boolean;
+  last_trading_day: string | null;
+  next_trading_day: string | null;
+  market_note: string;
   conclusion: string;
   direction: QuantDirectionDecision;
   etfs: QuantEtfDecision[];

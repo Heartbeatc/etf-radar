@@ -10,6 +10,7 @@ from app.adapters.market_data import MarketDataClient
 from app.adapters.event_bus import KafkaEventBus
 from app.adapters.store import Store
 from app.core.config import get_settings
+from app.core.market import market_clock
 from app.services.pipeline import TOPIC_SUFFIXES, model_payload, monitor_codes, roles_for, source_status_for
 
 LOGGER = logging.getLogger("etf.collector")
@@ -54,6 +55,13 @@ class CollectorWorker:
     async def poll_once(self, refresh_history: bool = False) -> tuple[int, int]:
         codes = monitor_codes(self.settings, self.store)
         roles = roles_for(self.settings, self.store.positions().keys())
+        clock = market_clock(extra_closed_dates=self.settings.market_extra_closed_date_list)
+        if not clock.should_poll_realtime:
+            statuses = source_status_for(self.settings, self.store.latest_snapshots(), codes=codes, roles=roles)
+            self.store.save_source_status(statuses)
+            LOGGER.info("collector skipped realtime poll status=%s note=%s", clock.status, clock.note)
+            return 0, len(statuses)
+
         snapshots = await self.client.fetch_spot(codes, roles)
         self.store.save_snapshots(snapshots)
         self.event_bus.publish_many("market.normalized.snapshot", [model_payload(item) for item in snapshots])

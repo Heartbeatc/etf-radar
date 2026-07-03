@@ -16,7 +16,7 @@ from app.adapters.etf_universe import EastmoneyEtfUniverseClient
 from app.adapters.infra import PostgresInfra, RedisInfra
 from app.adapters.store import Store
 from app.core.config import Settings
-from app.core.market import market_status
+from app.core.market import market_clock, market_status
 from app.domain.models import AiStatus, AiSummaryItem, AiSummaryReport, AiTradeRiskReview, DiscoveryResponse, EventCorpusReport, IntegrationStatus, LatestResponse, MarketFlowResponse, PoolRecommendationResponse, Position, QuantDecisionResponse, SourceStatus, TradePlan
 from app.services.ai import AIAnalyst
 from app.services.ai_summary import build_ai_context, due_summary_kinds, make_summary_item, summary_title, summary_windows_payload, trading_date
@@ -129,6 +129,13 @@ class Runtime:
     async def poll_once(self, refresh_history: bool = False) -> None:
         codes = self.monitor_codes()
         roles = self.roles()
+        clock = market_clock(extra_closed_dates=self.settings.market_extra_closed_date_list)
+        if not clock.should_poll_realtime:
+            self._last_warning = clock.note
+            statuses = self.source_status()
+            self.store.save_source_status(statuses)
+            return
+
         previous_signals = self.store.previous_signals(self.trade_codes())
         snapshots = await self.client.fetch_spot(codes, roles)
         self.store.save_snapshots(snapshots)
@@ -182,6 +189,14 @@ class Runtime:
             cached_at, cached = self._market_flow_cache
             if (now - cached_at).total_seconds() <= self.settings.discovery_cache_seconds:
                 return cached
+        clock = market_clock(extra_closed_dates=self.settings.market_extra_closed_date_list)
+        if not force and not clock.should_poll_realtime:
+            if self._market_flow_cache is not None:
+                return self._market_flow_cache[1]
+            history = self.store.market_flow_history(limit=1)
+            if history:
+                self._market_flow_cache = (now, history[0])
+                return history[0]
         etf_report: DiscoveryResponse | None = None
         event_report: EventCorpusReport | None = None
         if not self.settings.stock_focus_enabled:
@@ -263,6 +278,8 @@ class Runtime:
         await self._ensure_plan_data(code_list, role_map)
         latest = self.store.latest_snapshots()
         positions = self.store.positions()
+        clock = market_clock(extra_closed_dates=self.settings.market_extra_closed_date_list)
+        stale_seconds = self.settings.data_stale_seconds if clock.should_poll_realtime else self.settings.closed_market_stale_seconds
         plans: list[TradePlan] = []
         for code in code_list:
             snapshot = latest.get(code)
@@ -278,7 +295,7 @@ class Runtime:
                         daily=self.store.get_daily_bars(code),
                         minute=self.store.get_minute_bars(code),
                         position=positions.get(code),
-                        stale_seconds=self.settings.data_stale_seconds,
+                        stale_seconds=stale_seconds,
                     )
                 )
             )
@@ -286,6 +303,8 @@ class Runtime:
 
     async def _ensure_plan_data(self, codes: list[str], roles: dict[str, str]) -> None:
         latest = self.store.latest_snapshots()
+        if not market_clock(extra_closed_dates=self.settings.market_extra_closed_date_list).should_poll_realtime:
+            return
         now = datetime.now(timezone.utc)
         stale_codes = []
         for code in codes:

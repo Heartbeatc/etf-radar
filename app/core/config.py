@@ -38,9 +38,11 @@ class Settings(BaseSettings):
     collector_refresh_history_on_start: bool = True
     history_refresh_every_ticks: int = Field(default=10, ge=1, le=240)
     data_stale_seconds: int = Field(default=90, ge=30, le=600)
+    closed_market_stale_seconds: int = Field(default=1_209_600, ge=86_400, le=2_592_000)
     source_soft_stale_seconds: int = Field(default=120, ge=30, le=1200)
     database_path: str = "/opt/etf-radar/data/etf_radar.sqlite3"
     free_quote_fallback_enabled: bool = True
+    market_extra_closed_dates: str = ""
     discovery_cache_seconds: int = Field(default=30, ge=5, le=300)
     discovery_min_amount: float = Field(default=50_000_000, ge=1_000_000)
     discovery_max_directions: int = Field(default=8, ge=3, le=20)
@@ -121,6 +123,10 @@ class Settings(BaseSettings):
             return []
         delimiter = "\n" if "\n" in value else ";"
         return [item.strip() for item in value.split(delimiter) if item.strip()]
+
+    @property
+    def market_extra_closed_date_list(self) -> list[str]:
+        return _csv(self.market_extra_closed_dates)
 
     @property
     def allowed_hosts(self) -> list[str]:

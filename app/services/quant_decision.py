@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.core.market import market_status
+from app.core.market import market_clock
 from app.domain.models import (
     ActionDecisionItem,
     ActionDecisionResponse,
@@ -39,14 +39,27 @@ def build_quant_decision_report(
     holdings: list[QuantHoldingDecision] = build_holding_decisions(market_flow, positions or {}, plans or []) if positions else []
     fixed_actions = [_fixed_action_decision(item) for item in actions.items] if actions is not None else []
     conclusion = _conclusion(direction_decision, stocks, fixed_actions, holdings)
+    clock = market_clock()
+    generated_at = datetime.now(timezone.utc)
+    data_time = _latest_data_time(market_flow, plans or [], stocks, holdings)
+    data_age_seconds = round((generated_at - data_time).total_seconds(), 2) if data_time else None
     warnings = [*market_flow.warnings[:4]]
     if top_direction and top_direction.state != "confirmed_mainline":
         warnings.insert(0, "当前方向不是确认主升，A股操作以等待回踩和验证承接为主。")
     if top_direction and not top_direction.linked_stocks:
         warnings.insert(0, "当前方向缺少龙头/二龙头样本，不能给个股候选动作。")
     return QuantDecisionResponse(
-        generated_at=datetime.now(timezone.utc),
-        market_status=market_status(),
+        generated_at=generated_at,
+        server_time=clock.market_time,
+        data_time=data_time,
+        data_age_seconds=data_age_seconds,
+        market_status=clock.status,
+        market_status_label=clock.status_label,
+        is_trading_day=clock.is_trading_day,
+        should_poll_realtime=clock.should_poll_realtime,
+        last_trading_day=clock.last_trading_day,
+        next_trading_day=clock.next_trading_day,
+        market_note=clock.note,
         conclusion=conclusion,
         direction=direction_decision,
         etfs=etfs,
@@ -62,6 +75,33 @@ def build_quant_decision_report(
             "主升确认需要至少3个交易日的驻留样本、承接、扩散和反证过滤；单日热点不等于主升。",
         ],
     )
+
+
+def _latest_data_time(
+    market_flow: MarketFlowResponse,
+    plans: list[TradePlan],
+    stocks: list[QuantStockDecision],
+    holdings: list[QuantHoldingDecision],
+) -> datetime | None:
+    values: list[datetime] = []
+    for plan in plans:
+        if plan.source_time is not None:
+            values.append(plan.source_time)
+        elif plan.fetched_at is not None:
+            values.append(plan.fetched_at)
+    for stock in stocks:
+        if stock.source_time is not None:
+            values.append(stock.source_time)
+    for holding in holdings:
+        if holding.source_time is not None:
+            values.append(holding.source_time)
+    return max((_as_utc(value) for value in values), default=None)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDecision:

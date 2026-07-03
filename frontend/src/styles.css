@@ -42,12 +42,12 @@ input {
 }
 
 .excel-sheet {
-  width: max(1780px, 100%);
+  width: max(1540px, 100%);
   border-collapse: collapse;
   table-layout: fixed;
   background: #fff;
   color: #111;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
 }
 
@@ -56,39 +56,39 @@ input {
 }
 
 .direction-col {
-  width: 190px;
+  width: 155px;
 }
 
 .capital-col {
-  width: 190px;
+  width: 155px;
 }
 
 .phase-col {
-  width: 210px;
+  width: 180px;
 }
 
 .stock-col {
-  width: 210px;
+  width: 180px;
 }
 
 .price-col {
-  width: 150px;
+  width: 132px;
 }
 
 .zone-col {
-  width: 170px;
+  width: 145px;
 }
 
 .trigger-col {
-  width: 310px;
+  width: 230px;
 }
 
 .risk-col {
-  width: 150px;
+  width: 132px;
 }
 
 .exit-col {
-  width: 290px;
+  width: 220px;
 }
 
 .action-col {
@@ -98,7 +98,7 @@ input {
 .excel-sheet th,
 .excel-sheet td {
   height: 34px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   border: 1px solid #d9d9d9;
   text-align: left;
   vertical-align: middle;
@@ -133,6 +133,15 @@ input {
   color: #666;
 }
 
+.clock-row td {
+  background: #fbfbfb;
+}
+
+.clock-row .sheet-meta strong {
+  color: #333;
+  font-size: 12px;
+}
+
 .ai-direction-summary {
   color: #111 !important;
   font-weight: 600;
@@ -141,7 +150,7 @@ input {
 .excel-sheet td strong {
   display: block;
   margin-bottom: 2px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -247,7 +256,7 @@ input {
   }
 
   .excel-sheet {
-    width: 1780px;
+    width: 1540px;
   }
 }
 

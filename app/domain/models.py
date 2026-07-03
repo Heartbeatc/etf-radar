@@ -691,7 +691,16 @@ class QuantHoldingDecision(BaseModel):
 
 class QuantDecisionResponse(BaseModel):
     generated_at: datetime
+    server_time: datetime | None = None
+    data_time: datetime | None = None
+    data_age_seconds: float | None = None
     market_status: str
+    market_status_label: str = ""
+    is_trading_day: bool = True
+    should_poll_realtime: bool = True
+    last_trading_day: str | None = None
+    next_trading_day: str | None = None
+    market_note: str = ""
     conclusion: str
     direction: QuantDirectionDecision
     etfs: list[QuantEtfDecision]

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
@@ -30,6 +30,7 @@ export function QuantWorkbench({
   const stocks = pickStocks(decision?.bottom_candidates ?? []);
   const candidateRows = stocks.length ? stocks : [null];
   const status = capitalStatus(direction);
+  const now = useLiveNow();
   const [code, setCode] = useState('');
   const [entryPrice, setEntryPrice] = useState('');
   const [shares, setShares] = useState('');
@@ -82,15 +83,16 @@ export function QuantWorkbench({
           </tr>
         </thead>
         <tbody>
-          <tr>
+          <tr className="clock-row">
             <th className="row-index">1</th>
             <td className="sheet-title">A股主线执行表</td>
-            <td className="sheet-meta">{formatDateTime(decision?.generated_at)}</td>
-            <td className="sheet-meta">30 秒刷新</td>
-            <td className="sheet-meta">{decision?.market_status ?? '-'}</td>
-            <td className="sheet-meta" colSpan={5}>
-              <span>{decision?.conclusion ?? '等待数据'}</span>
-              {formatAiDirectionSummary(decision)}
+            <td className="sheet-meta"><strong>当前</strong><span>{formatClock(now)}</span></td>
+            <td className="sheet-meta"><strong>行情</strong><span>{formatDateTime(decision?.data_time)}</span></td>
+            <td className="sheet-meta"><strong>状态</strong><span>{formatMarketStatus(decision)}</span></td>
+            <td className="sheet-meta"><strong>数据龄</strong><span>{formatDecisionDataAge(decision)}</span></td>
+            <td className="sheet-meta" colSpan={4}>
+              <strong>{decision?.should_poll_realtime ? '实时轮询' : '暂停源站轮询'}</strong>
+              <span>{shortText(decision?.market_note || decision?.conclusion || '等待数据', 72)}</span>
             </td>
             <td className="sheet-actions">
               <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? '刷新中' : '刷新'}</button>
@@ -105,7 +107,7 @@ export function QuantWorkbench({
             <td><input value={shares} onChange={(event) => setShares(event.target.value)} placeholder="数量可空" inputMode="decimal" /></td>
             <td><input value={entryDate} onChange={(event) => setEntryDate(event.target.value)} type="date" /></td>
             <td colSpan={3}><input value={note} onChange={(event) => setNote(event.target.value)} placeholder="备注可空" /></td>
-            <td className="sheet-meta">保存后加入30秒监控</td>
+            <td className="sheet-meta">保存后纳入持仓风控</td>
             <td className="sheet-actions"><button type="button" onClick={save} disabled={savingPosition}>{savingPosition ? '保存中' : '保存'}</button></td>
           </tr>
           <tr className="excel-header-row">
@@ -132,7 +134,7 @@ export function QuantWorkbench({
               <td>{formatHoldingRebound(holding)}</td>
               <td>{formatHoldingMainForce(holding)}</td>
               <td>{formatHoldingRisk(holding)}</td>
-              <td>{holding.exit_plan}</td>
+              <td>{shortText(holding.exit_plan, 58)}</td>
               <td>{formatHoldingAction(holding, onDeletePosition, deletingPosition)}</td>
             </tr>
           ))}
@@ -149,7 +151,7 @@ export function QuantWorkbench({
               <td>{stock ? formatStock(stock) : '暂无可抄底股票'}</td>
               <td>{stock ? formatPriceCell(stock) : '-'}</td>
               <td>{stock ? formatZone(stock) : '-'}</td>
-              <td>{stock?.execution?.trigger_signal ?? '-'}</td>
+              <td>{stock ? shortText(stock.execution?.trigger_signal ?? '-', 54) : '-'}</td>
               <td>{stock ? formatRiskCell(stock) : '-'}</td>
               <td>{stock ? formatExitCell(stock) : '-'}</td>
               <td>{stock ? formatActionCell(stock) : '等待'}</td>
@@ -167,10 +169,63 @@ export function QuantWorkbench({
   );
 }
 
-function formatAiDirectionSummary(decision?: QuantDecisionResponse) {
-  const summary = decision?.ai_direction_summaries?.[0];
-  if (!summary) return null;
-  return <span className="ai-direction-summary">AI {summary.title}：{summary.summary}</span>;
+function useLiveNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return now;
+}
+
+function formatClock(value: Date): string {
+  return value.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+}
+
+function formatDecisionDataAge(decision?: QuantDecisionResponse): string {
+  if (!decision) return '-';
+  if (!decision.should_poll_realtime) return '闭市快照';
+  return formatDataAge(decision.data_age_seconds);
+}
+
+function formatDataAge(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-';
+  if (value < 60) return `${Math.max(0, Math.round(value))}秒`;
+  if (value < 3600) return `${Math.round(value / 60)}分`;
+  return `${(value / 3600).toFixed(1)}小时`;
+}
+
+function formatMarketStatus(decision?: QuantDecisionResponse): string {
+  if (!decision) return '-';
+  const label = decision.market_status_label || marketStatusFallback(decision.market_status);
+  const next = decision.should_poll_realtime ? '' : ` / 下个交易日 ${decision.next_trading_day ?? '-'}`;
+  return `${label}${next}`;
+}
+
+function marketStatusFallback(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    trading: '交易中',
+    pre_open: '开盘前/集合竞价',
+    midday_break: '午间休市',
+    post_close: '已收盘',
+    closed_weekend: '周末休市',
+    closed_holiday: '节假日休市',
+    closed: '非交易时段'
+  };
+  return value ? map[value] ?? value : '-';
+}
+
+function shortText(value: string | null | undefined, max = 60): string {
+  const text = (value ?? '').trim();
+  if (!text) return '-';
+  return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
@@ -189,7 +244,7 @@ function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
   return [...items]
     .filter((item) => item.code && item.name)
     .sort((a, b) => (actionRank[a.action] ?? 50) - (actionRank[b.action] ?? 50) || b.bottom_score - a.bottom_score || b.score - a.score)
-    .slice(0, 6);
+    .slice(0, 4);
 }
 
 function formatDirection(direction?: QuantDirectionDecision) {
@@ -270,8 +325,8 @@ function formatHoldingAction(item: QuantHoldingDecision, onDelete: (code: string
   return (
     <>
       <strong className={`holding-action holding-${item.risk_level}`}>{item.action_label}</strong>
-      <span>{item.position_plan}</span>
-      {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(item.ai_risk_review.risk_level)}：{item.ai_risk_review.conclusion}</span> : null}
+      <span>{shortText(item.position_plan, 46)}</span>
+      {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(item.ai_risk_review.risk_level)}：{shortText(item.ai_risk_review.conclusion, 44)}</span> : null}
       <button type="button" className="link-button" onClick={() => onDelete(item.code)} disabled={deleting}>删除持仓</button>
     </>
   );
@@ -323,8 +378,8 @@ function formatExitCell(item: QuantStockDecision) {
   return (
     <>
       <strong>主力走弱先减仓</strong>
-      <span>{execution?.reduce_signal ?? '-'}</span>
-      <span>{execution?.hard_exit_signal ?? execution?.invalidation_signal ?? '-'}</span>
+      <span>{shortText(execution?.reduce_signal ?? '-', 42)}</span>
+      <span>{shortText(execution?.hard_exit_signal ?? execution?.invalidation_signal ?? '-', 42)}</span>
     </>
   );
 }
@@ -334,9 +389,9 @@ function formatActionCell(item: QuantStockDecision) {
   return (
     <>
       <strong className={`action-${execution?.decision_state ?? 'monitor'}`}>{execution?.decision_label ?? actionLabel(item.action)}</strong>
-      <span>{execution?.decision_reason ?? item.operation}</span>
-      {execution?.position_plan ? <span>{execution.position_plan}</span> : null}
-      {execution?.ai_risk_review ? <span className={`ai-risk ai-risk-${execution.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(execution.ai_risk_review.risk_level)}：{execution.ai_risk_review.conclusion}</span> : null}
+      <span>{shortText(execution?.decision_reason ?? item.operation, 52)}</span>
+      {execution?.position_plan ? <span>{shortText(execution.position_plan, 52)}</span> : null}
+      {execution?.ai_risk_review ? <span className={`ai-risk ai-risk-${execution.ai_risk_review.risk_level}`}>AI风险 {riskLevelLabel(execution.ai_risk_review.risk_level)}：{shortText(execution.ai_risk_review.conclusion, 44)}</span> : null}
     </>
   );
 }

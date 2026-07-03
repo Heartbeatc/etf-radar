@@ -572,6 +572,32 @@ class QuantEtfDecision(BaseModel):
     risk_flags: list[str]
 
 
+class QuantStockExecutionCondition(BaseModel):
+    key: str
+    label: str
+    status: str
+    value: str | None = None
+    threshold: str | None = None
+    reason: str
+
+
+class QuantStockExecutionPlan(BaseModel):
+    decision_state: str
+    decision_label: str
+    decision_reason: str
+    order_style: str
+    buy_zone_low: float | None = None
+    buy_zone_high: float | None = None
+    avoid_above: float | None = None
+    stop_price: float | None = None
+    take_profit_price: float | None = None
+    trigger_signal: str
+    invalidation_signal: str
+    position_plan: str
+    conditions: list[QuantStockExecutionCondition] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+
+
 class QuantStockDecision(BaseModel):
     code: str
     name: str
@@ -588,6 +614,7 @@ class QuantStockDecision(BaseModel):
     main_net_inflow: float | None = None
     main_net_inflow_pct: float | None = None
     source_time: datetime | None = None
+    execution: QuantStockExecutionPlan | None = None
     reasons: list[str]
     risk_flags: list[str]
 

@@ -12,18 +12,22 @@ interface QuantWorkbenchProps {
 export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, errorMessage }: QuantWorkbenchProps) {
   const direction = decision?.direction;
   const stocks = pickStocks(decision?.stocks ?? []);
+  const rows = stocks.length ? stocks : [null];
   const status = capitalStatus(direction);
-  const primaryAction = stocks[0]?.operation ?? decision?.conclusion ?? '等待数据';
 
   return (
     <main className="excel-page">
-      <table className="excel-sheet" aria-label="A股主线个股表">
+      <table className="excel-sheet" aria-label="A股主线执行表">
         <colgroup>
           <col className="row-index-col" />
           <col className="direction-col" />
           <col className="capital-col" />
           <col className="phase-col" />
           <col className="stock-col" />
+          <col className="price-col" />
+          <col className="zone-col" />
+          <col className="trigger-col" />
+          <col className="risk-col" />
           <col className="action-col" />
         </colgroup>
         <thead>
@@ -34,15 +38,20 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <th>C</th>
             <th>D</th>
             <th>E</th>
+            <th>F</th>
+            <th>G</th>
+            <th>H</th>
+            <th>I</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th className="row-index">1</th>
-            <td className="sheet-title">A股主线个股表</td>
+            <td className="sheet-title">A股主线执行表</td>
             <td className="sheet-meta">{formatDateTime(decision?.generated_at)}</td>
             <td className="sheet-meta">30 秒刷新</td>
             <td className="sheet-meta">{decision?.market_status ?? '-'}</td>
+            <td className="sheet-meta" colSpan={4}>{decision?.conclusion ?? '等待数据'}</td>
             <td className="sheet-actions">
               <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? '刷新中' : '刷新'}</button>
               <button type="button" onClick={onLogout}>退出</button>
@@ -52,34 +61,32 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <th className="row-index">2</th>
             <td>最近方向</td>
             <td>主力在不在</td>
-            <td>目前阶段</td>
-            <td>龙头/二龙头</td>
+            <td>阶段</td>
+            <td>标的</td>
+            <td>现价</td>
+            <td>低吸区</td>
+            <td>触发信号</td>
+            <td>防守/止盈</td>
             <td>动作</td>
           </tr>
-          <tr>
-            <th className="row-index">3</th>
-            <td>
-              <strong>{direction?.direction_label ?? '暂无方向'}</strong>
-              <span>{direction ? `7日 ${formatMaybeScore(direction.seven_day_score)} / 主线 ${formatMaybeScore(direction.mainline_probability)}` : '-'}</span>
-            </td>
-            <td>
-              <strong className={`capital-${status.kind}`}>{status.label}</strong>
-              <span>驻留 {formatMaybeScore(direction?.residency_score)} / 承接 {formatMaybeScore(direction?.retention_score)}</span>
-            </td>
-            <td>
-              <strong>{direction?.phase_label ?? '无数据'}</strong>
-              <span>{direction?.confidence ? `置信 ${confidenceLabel(direction.confidence)}` : '-'}</span>
-            </td>
-            <td>{formatStocks(stocks)}</td>
-            <td>
-              <strong>{actionLabel(stocks[0]?.action)}</strong>
-              <span>{primaryAction}</span>
-            </td>
-          </tr>
+          {rows.map((stock, index) => (
+            <tr key={stock?.code ?? `empty-${index}`}>
+              <th className="row-index">{index + 3}</th>
+              <td>{index === 0 ? formatDirection(direction) : ''}</td>
+              <td>{index === 0 ? formatCapital(status, direction) : ''}</td>
+              <td>{index === 0 ? formatPhase(direction) : ''}</td>
+              <td>{stock ? formatStock(stock) : '暂无龙头/二龙头样本'}</td>
+              <td>{stock ? formatPriceCell(stock) : '-'}</td>
+              <td>{stock ? formatZone(stock) : '-'}</td>
+              <td>{stock?.execution?.trigger_signal ?? '-'}</td>
+              <td>{stock ? formatRiskCell(stock) : '-'}</td>
+              <td>{stock ? formatActionCell(stock) : '等待'}</td>
+            </tr>
+          ))}
           {errorMessage && (
             <tr>
-              <th className="row-index">4</th>
-              <td className="sheet-error" colSpan={5}>{errorMessage}</td>
+              <th className="row-index">{rows.length + 3}</th>
+              <td className="sheet-error" colSpan={9}>{errorMessage}</td>
             </tr>
           )}
         </tbody>
@@ -89,19 +96,101 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
 }
 
 function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
+  const actionRank: Record<string, number> = {
+    BUY_PROBE: 0,
+    WAIT_CONFIRMATION: 1,
+    WAIT_BUY_ZONE: 2,
+    WAIT_PULLBACK: 3,
+    DO_NOT_CHASE: 4,
+    OBSERVE_NEXT_DAY: 5,
+    VERIFY_ONLY: 6,
+    VERIFY_DIRECTION: 7,
+    AVOID: 8,
+    WATCH: 9
+  };
   return [...items]
     .filter((item) => item.code && item.name)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+    .sort((a, b) => (actionRank[a.action] ?? 50) - (actionRank[b.action] ?? 50) || b.score - a.score)
+    .slice(0, 6);
 }
 
-function formatStocks(items: QuantStockDecision[]): string {
-  if (!items.length) return '暂无龙头/二龙头样本';
-  return items.map((item) => {
-    const change = item.change_pct == null ? '-' : `${item.change_pct.toFixed(2)}%`;
-    const board = item.board_name ? `/${item.board_name}` : '';
-    return `${stockRoleLabel(item.verifier_role)} ${item.code} ${item.name}${board} ${change} 分${formatScore(item.score)}`;
-  }).join('；');
+function formatDirection(direction?: QuantDirectionDecision) {
+  return (
+    <>
+      <strong>{direction?.direction_label ?? '暂无方向'}</strong>
+      <span>{direction ? `7日 ${formatMaybeScore(direction.seven_day_score)} / 主线 ${formatMaybeScore(direction.mainline_probability)}` : '-'}</span>
+    </>
+  );
+}
+
+function formatCapital(status: { label: string; kind: string }, direction?: QuantDirectionDecision) {
+  return (
+    <>
+      <strong className={`capital-${status.kind}`}>{status.label}</strong>
+      <span>驻留 {formatMaybeScore(direction?.residency_score)} / 承接 {formatMaybeScore(direction?.retention_score)}</span>
+    </>
+  );
+}
+
+function formatPhase(direction?: QuantDirectionDecision) {
+  return (
+    <>
+      <strong>{direction?.phase_label ?? '无数据'}</strong>
+      <span>{direction?.confidence ? `置信 ${confidenceLabel(direction.confidence)}` : '-'}</span>
+    </>
+  );
+}
+
+function formatStock(item: QuantStockDecision) {
+  const board = item.board_name ? ` / ${item.board_name}` : '';
+  return (
+    <>
+      <strong>{stockRoleLabel(item.verifier_role)} {item.code} {item.name}</strong>
+      <span>分 {formatScore(item.score)}{board}</span>
+    </>
+  );
+}
+
+function formatPriceCell(item: QuantStockDecision) {
+  const change = item.change_pct == null ? '-' : `${item.change_pct.toFixed(2)}%`;
+  const inflow = item.main_net_inflow_pct == null ? '-' : `${item.main_net_inflow_pct.toFixed(2)}%`;
+  return (
+    <>
+      <strong>{formatPrice(item.price)}</strong>
+      <span>涨跌 {change} / 净流 {inflow}</span>
+    </>
+  );
+}
+
+function formatZone(item: QuantStockDecision) {
+  const execution = item.execution;
+  return (
+    <>
+      <strong>{formatRange(execution?.buy_zone_low, execution?.buy_zone_high)}</strong>
+      <span>超过 {formatPrice(execution?.avoid_above)} 不买</span>
+    </>
+  );
+}
+
+function formatRiskCell(item: QuantStockDecision) {
+  const execution = item.execution;
+  return (
+    <>
+      <strong>防守 {formatPrice(execution?.stop_price)}</strong>
+      <span>止盈 {formatPrice(execution?.take_profit_price)}</span>
+    </>
+  );
+}
+
+function formatActionCell(item: QuantStockDecision) {
+  const execution = item.execution;
+  return (
+    <>
+      <strong className={`action-${execution?.decision_state ?? 'monitor'}`}>{execution?.decision_label ?? actionLabel(item.action)}</strong>
+      <span>{execution?.decision_reason ?? item.operation}</span>
+      {execution?.position_plan ? <span>{execution.position_plan}</span> : null}
+    </>
+  );
 }
 
 function stockRoleLabel(value: string | null | undefined): string {
@@ -136,6 +225,9 @@ function confidenceLabel(value: string): string {
 
 function actionLabel(value: string | null | undefined): string {
   const map: Record<string, string> = {
+    BUY_PROBE: '可试仓',
+    WAIT_CONFIRMATION: '等承接',
+    WAIT_BUY_ZONE: '等低吸区',
     WATCH_LOW_BUY: '等低吸',
     WAIT_PULLBACK: '等回踩',
     DO_NOT_CHASE: '不追高',
@@ -150,4 +242,13 @@ function actionLabel(value: string | null | undefined): string {
 
 function formatMaybeScore(value: number | null | undefined): string {
   return value == null ? '-' : formatScore(value);
+}
+
+function formatPrice(value: number | null | undefined): string {
+  return value == null ? '-' : value.toFixed(2);
+}
+
+function formatRange(low: number | null | undefined, high: number | null | undefined): string {
+  if (low == null || high == null) return '-';
+  return `${low.toFixed(2)} - ${high.toFixed(2)}`;
 }

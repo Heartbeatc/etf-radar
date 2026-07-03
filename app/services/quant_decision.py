@@ -15,6 +15,8 @@ from app.domain.models import (
     QuantDirectionDecision,
     QuantEtfDecision,
     QuantStockDecision,
+    QuantStockExecutionCondition,
+    QuantStockExecutionPlan,
 )
 
 
@@ -46,7 +48,7 @@ def build_quant_decision_report(
         assumptions=[
             "当前为A股个股聚焦模式：先识别市场资金方向，再筛方向内龙头、二龙头和扩散股。",
             "龙头/二龙头来自方向内成分股的涨幅、成交额、量比、资金流代理和带动性排序。",
-            "个股候选不是自动买入指令；缺少Level-2、盘口队列和个股多周期K线前，不输出精确买卖价。",
+            "个股候选会输出估算低吸区、触发信号、防守价和止盈参考；缺少Level-2时只能小仓试错，不自动下单。",
             "主升确认需要至少3个交易日的驻留样本、承接、扩散和反证过滤；单日热点不等于主升。",
         ],
     )
@@ -119,7 +121,9 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
         stocks = [direction.representative_stock]
     result: list[QuantStockDecision] = []
     for stock in stocks:
-        action, operation, risks = _stock_action(direction, stock)
+        base_action, operation, risks = _stock_action(direction, stock)
+        execution = _stock_execution_plan(direction, stock, base_action, risks)
+        action = _stock_final_action(base_action, execution)
         result.append(
             QuantStockDecision(
                 code=stock.code,
@@ -137,8 +141,9 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
                 main_net_inflow=stock.main_net_inflow,
                 main_net_inflow_pct=stock.main_net_inflow_pct,
                 source_time=stock.source_time,
+                execution=execution,
                 reasons=(stock.evidence[:5] or ["方向龙头/二龙头候选"]),
-                risk_flags=_dedupe([*stock.risk_flags[:5], *risks])[:8],
+                risk_flags=_dedupe([*stock.risk_flags[:5], *risks, *execution.blockers])[:8],
             )
         )
     result.sort(key=lambda item: item.score, reverse=True)
@@ -166,6 +171,292 @@ def _stock_action(direction: MarketDirection, stock: MarketStockCandidate) -> tu
     if stock.score >= 65:
         return "VERIFY_DIRECTION", "作为方向强弱验证股，等待更明确阶段。", []
     return "WATCH", "关联度一般，只观察不操作。", ["个股强度不足"]
+
+
+def _stock_execution_plan(
+    direction: MarketDirection,
+    stock: MarketStockCandidate,
+    base_action: str,
+    base_risks: list[str],
+) -> QuantStockExecutionPlan:
+    zone_low, zone_high, avoid_above, stop_price, take_profit_price = _stock_price_levels(stock)
+    price = stock.price
+    change = stock.change_pct if stock.change_pct is not None else 0.0
+    inflow_pct = stock.main_net_inflow_pct if stock.main_net_inflow_pct is not None else 0.0
+    volume_ratio = stock.volume_ratio
+    history_days = int(direction.factor_scores.get("history_days", 0) or 0)
+    seven_day_score = int(direction.factor_scores.get("seven_day_score", 0) or 0)
+
+    direction_ready = direction.state == "confirmed_mainline" or (
+        direction.state == "candidate"
+        and history_days >= 3
+        and seven_day_score >= 60
+        and direction.low_buy_readiness_score >= 62
+        and direction.residency_score >= 60
+        and direction.retention_score >= 60
+    )
+    if direction.state in {"weakening", "weak_direction"}:
+        direction_status = "failed"
+        direction_reason = "方向处于弱化段，不支持新开仓"
+    elif direction_ready:
+        direction_status = "passed"
+        direction_reason = "方向阶段和7日驻留达到低吸前置条件"
+    elif direction.state == "candidate":
+        direction_status = "pending"
+        direction_reason = "方向仍是候选段，等待至少3个交易日驻留或承接增强"
+    else:
+        direction_status = "pending"
+        direction_reason = "方向尚未进入可低吸阶段"
+
+    price_in_zone = price is not None and zone_low is not None and zone_high is not None and zone_low <= price <= zone_high
+    price_above_avoid = price is not None and avoid_above is not None and price > avoid_above
+    if price is None or zone_low is None or zone_high is None:
+        price_status = "pending"
+        price_reason = "缺少现价，不能计算低吸区"
+    elif price_in_zone:
+        price_status = "passed"
+        price_reason = "现价已经进入低吸区"
+    elif price_above_avoid:
+        price_status = "failed"
+        price_reason = "现价高于不追价，等待回踩"
+    elif price < zone_low:
+        price_status = "pending"
+        price_reason = "现价低于低吸区，等重新企稳进入区间"
+    else:
+        price_status = "pending"
+        price_reason = "现价尚未回到低吸区"
+
+    if inflow_pct >= 2 and direction.residency_score >= 60 and direction.retention_score >= 60:
+        capital_status = "passed"
+        capital_reason = "个股资金流代理和方向驻留/承接同时达标"
+    elif inflow_pct >= 0 and direction.retention_score >= 55:
+        capital_status = "pending"
+        capital_reason = "承接尚可，但资金流强度还不够买入触发"
+    else:
+        capital_status = "failed"
+        capital_reason = "资金流代理偏弱，价格到了也不能直接买"
+
+    if change >= 9:
+        heat_status = "failed"
+        heat_reason = "接近涨停或已经加速，禁止追高"
+    elif change > 6.5:
+        heat_status = "pending"
+        heat_reason = "短线涨幅偏高，需要更多回踩"
+    elif change >= -3:
+        heat_status = "passed"
+        heat_reason = "短线热度处于可观察区间"
+    else:
+        heat_status = "pending"
+        heat_reason = "跌幅较大，需确认不是破位"
+
+    if volume_ratio is None:
+        volume_status = "pending"
+        volume_reason = "缺少量比，等待下一轮数据"
+    elif 1.0 <= volume_ratio <= 5.0:
+        volume_status = "passed"
+        volume_reason = "量比支持承接且未明显失控"
+    elif volume_ratio > 5.0:
+        volume_status = "pending"
+        volume_reason = "量比过高，可能是加速脉冲"
+    else:
+        volume_status = "pending"
+        volume_reason = "量能不足，等待放量承接"
+
+    if stock.score >= 72 and stock.verifier_role in {"leader", "second_leader", "expansion"}:
+        stock_status = "passed"
+        stock_reason = "个股强度和方向角色达标"
+    elif stock.score >= 65:
+        stock_status = "pending"
+        stock_reason = "个股只适合验证方向，暂不升级为买点"
+    else:
+        stock_status = "failed"
+        stock_reason = "个股强度不足，不能作为低吸标的"
+
+    conditions = [
+        _stock_condition(
+            "direction_phase",
+            "方向阶段",
+            direction_status,
+            f"{direction.phase_label if hasattr(direction, 'phase_label') else direction.state} / 7日{seven_day_score} / 历史{history_days}天",
+            "确认主线，或候选方向历史>=3天且7日分>=60",
+            direction_reason,
+        ),
+        _stock_condition(
+            "price_zone",
+            "价格区间",
+            price_status,
+            _price_range_text(zone_low, zone_high, current=price),
+            "现价进入低吸区且不高于不追价",
+            price_reason,
+        ),
+        _stock_condition(
+            "capital_acceptance",
+            "资金承接",
+            capital_status,
+            f"净流入占比{inflow_pct:.2f}% / 驻留{direction.residency_score} / 承接{direction.retention_score}",
+            "净流入占比>=2%，驻留和承接>=60",
+            capital_reason,
+        ),
+        _stock_condition(
+            "heat_control",
+            "热度控制",
+            heat_status,
+            f"涨跌幅{change:.2f}%",
+            "涨幅低于6.5%，且不是破位下跌",
+            heat_reason,
+        ),
+        _stock_condition(
+            "volume_shape",
+            "量能形态",
+            volume_status,
+            "-" if volume_ratio is None else f"量比{volume_ratio:.2f}",
+            "量比1.0-5.0",
+            volume_reason,
+        ),
+        _stock_condition(
+            "stock_quality",
+            "个股质量",
+            stock_status,
+            f"分{stock.score} / {stock.verifier_role}",
+            "方向角色明确，强度分>=72",
+            stock_reason,
+        ),
+    ]
+
+    hard_no = base_action in {"AVOID", "DO_NOT_CHASE", "VERIFY_ONLY"} or direction.state in {"weakening", "weak_direction"}
+    required = {"direction_phase", "price_zone", "capital_acceptance", "heat_control", "stock_quality"}
+    required_passed = all(item.status == "passed" for item in conditions if item.key in required)
+    blockers = [item.reason for item in conditions if item.status == "failed"]
+
+    if hard_no:
+        decision_state = "no_buy"
+        decision_label = "不买"
+        decision_reason = "方向或个股热度触发硬过滤，当前不开仓。"
+        position_plan = "不开仓。"
+    elif required_passed:
+        decision_state = "buy_probe"
+        decision_label = "可试仓"
+        decision_reason = "价格、方向、资金承接和热度同时达标，只允许小仓位试错。"
+        position_plan = "候选方向首仓不超过10%；确认主线可提高到15%，禁止一次打满。"
+    elif price_in_zone:
+        decision_state = "wait_confirmation"
+        decision_label = "等承接"
+        decision_reason = "价格到了，但方向阶段或资金承接还没过阈值；下一轮价格离开区间则自动回到等待。"
+        position_plan = "0仓等待，承接条件过阈值后再考虑试仓。"
+    elif price_above_avoid:
+        decision_state = "wait_pullback"
+        decision_label = "等回踩"
+        decision_reason = "现价高于不追价，不能把追高当低吸。"
+        position_plan = "0仓等待回踩到低吸区。"
+    else:
+        decision_state = "wait_buy_zone"
+        decision_label = "等低吸区"
+        decision_reason = "价格还没有进入低吸区，先不买。"
+        position_plan = "0仓等待价格和承接同时满足。"
+
+    trigger_signal = _trigger_signal(zone_low, zone_high)
+    invalidation_signal = _invalidation_signal(stop_price)
+    return QuantStockExecutionPlan(
+        decision_state=decision_state,
+        decision_label=decision_label,
+        decision_reason=decision_reason,
+        order_style="人工限价；只在低吸区内执行，不追市价单",
+        buy_zone_low=zone_low,
+        buy_zone_high=zone_high,
+        avoid_above=avoid_above,
+        stop_price=stop_price,
+        take_profit_price=take_profit_price,
+        trigger_signal=trigger_signal,
+        invalidation_signal=invalidation_signal,
+        position_plan=position_plan,
+        conditions=conditions,
+        blockers=_dedupe([*base_risks, *blockers])[:8],
+    )
+
+
+def _stock_final_action(base_action: str, execution: QuantStockExecutionPlan) -> str:
+    if base_action == "DO_NOT_CHASE":
+        return "DO_NOT_CHASE"
+    if base_action == "VERIFY_ONLY":
+        return "VERIFY_ONLY"
+    if base_action == "OBSERVE_NEXT_DAY":
+        return "OBSERVE_NEXT_DAY"
+    if execution.decision_state == "buy_probe":
+        return "BUY_PROBE"
+    if execution.decision_state == "wait_confirmation":
+        return "WAIT_CONFIRMATION"
+    if execution.decision_state == "wait_pullback":
+        return "WAIT_PULLBACK"
+    if execution.decision_state == "wait_buy_zone":
+        return "WAIT_BUY_ZONE"
+    if execution.decision_state == "no_buy":
+        return "AVOID"
+    return base_action
+
+
+def _stock_price_levels(stock: MarketStockCandidate) -> tuple[float | None, float | None, float | None, float | None, float | None]:
+    price = stock.price
+    if price is None or price <= 0:
+        return None, None, None, None, None
+    change = stock.change_pct if stock.change_pct is not None else 0.0
+    previous_close = price / (1 + change / 100) if change > -95 else price
+    if change >= 9:
+        zone_low = max(previous_close * 1.025, price * 0.94)
+        zone_high = min(previous_close * 1.055, price * 0.975)
+    elif change >= 6:
+        zone_low = max(previous_close * 1.015, price * 0.955)
+        zone_high = min(previous_close * 1.045, price * 0.985)
+    elif change >= 2:
+        zone_low = max(previous_close, price * 0.975)
+        zone_high = min(previous_close * 1.035, price * 1.003)
+    elif change >= -1.5:
+        zone_low = price * 0.985
+        zone_high = price * 1.012
+    else:
+        zone_low = price * 0.98
+        zone_high = price * 1.005
+    if zone_low > zone_high:
+        zone_low, zone_high = zone_high, zone_low
+    zone_low = _round_price(zone_low)
+    zone_high = _round_price(zone_high)
+    avoid_above = _round_price(zone_high * 1.012)
+    stop_price = _round_price(zone_low * 0.965)
+    take_profit_price = _round_price(zone_high * 1.065)
+    return zone_low, zone_high, avoid_above, stop_price, take_profit_price
+
+
+def _stock_condition(key: str, label: str, status: str, value: str | None, threshold: str | None, reason: str) -> QuantStockExecutionCondition:
+    return QuantStockExecutionCondition(
+        key=key,
+        label=label,
+        status=status,
+        value=value,
+        threshold=threshold,
+        reason=reason,
+    )
+
+
+def _trigger_signal(zone_low: float | None, zone_high: float | None) -> str:
+    zone = _price_range_text(zone_low, zone_high)
+    return f"价格进入{zone}；方向仍在前排；个股主力净流入占比>=2%；回踩缩量后反弹放量。"
+
+
+def _invalidation_signal(stop_price: float | None) -> str:
+    stop = "-" if stop_price is None else f"{stop_price:.2f}"
+    return f"跌破防守价{stop}，或方向跌出前排，或主力净流入占比转<-3%，取消低吸。"
+
+
+def _price_range_text(low: float | None, high: float | None, current: float | None = None) -> str:
+    zone = "-" if low is None or high is None else f"{low:.2f}-{high:.2f}"
+    if current is None:
+        return zone
+    return f"现价{current:.2f} / 区间{zone}"
+
+
+def _round_price(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value + 1e-9, 2)
 
 
 # ETF path is kept only for legacy API compatibility. The main web page no longer displays it.
@@ -244,13 +535,17 @@ def _fixed_operation(item: ActionDecisionItem) -> str:
 
 def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecision], fixed_actions: list[QuantEtfDecision]) -> str:
     sell = [item for item in fixed_actions if item.action.startswith("SELL") or item.action == "REDUCE_OR_HOLD_TIGHT"]
-    low_buy = [item for item in stocks if item.action == "WATCH_LOW_BUY"]
+    buy_probe = [item for item in stocks if item.action == "BUY_PROBE"]
+    wait_buy = [item for item in stocks if item.action in {"WAIT_BUY_ZONE", "WAIT_CONFIRMATION"}]
     hot = [item for item in stocks if item.action in {"WAIT_PULLBACK", "DO_NOT_CHASE", "OBSERVE_NEXT_DAY"}]
     if sell:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓优先按卖出/减仓信号处理。"
-    if low_buy:
-        names = "、".join(f"{item.name}({item.code})" for item in low_buy[:3])
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；A股候选为 {names}，只等回踩承接，不追高。"
+    if buy_probe:
+        names = "、".join(f"{item.name}({item.code})" for item in buy_probe[:2])
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；{names} 满足低吸触发，只允许小仓试错。"
+    if wait_buy:
+        names = "、".join(f"{item.name}({item.code})" for item in wait_buy[:3])
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；A股候选为 {names}，等待低吸区和承接同时满足。"
     if hot:
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；方向龙头/二龙头偏热或需次日承接，当前不追。"
     if stocks:

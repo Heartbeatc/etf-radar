@@ -53,6 +53,7 @@ def direction(
     linked_stocks: list[MarketStockCandidate] | None = None,
     direction_key: str = "robotics_highend",
     direction_label: str = "机器人/高端制造",
+    factor_scores: dict[str, int] | None = None,
 ) -> MarketDirection:
     linked_stocks = linked_stocks or []
     return MarketDirection(
@@ -72,7 +73,7 @@ def direction(
         main_etfs=linked_etfs[:2],
         backup_etf=linked_etfs[2] if len(linked_etfs) > 2 else None,
         top_boards=[],
-        factor_scores={"history_days": 3, "persistence": 70, "impulse_risk": 35},
+        factor_scores=factor_scores or {"history_days": 3, "persistence": 70, "impulse_risk": 35, "seven_day_score": 66},
         mainline_probability=probability,
         residency_score=72,
         retention_score=70,
@@ -194,3 +195,48 @@ def test_recent_direction_score_prefers_multi_day_residency_over_one_day_spike()
 
     assert stats["robotics_highend"].days_count == 3
     assert _seven_day_direction_score(stats["gold_resources"]) > _seven_day_direction_score(stats["robotics_highend"])
+
+
+def test_stock_execution_outputs_probe_only_when_price_and_acceptance_pass():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    report = build_quant_decision_report(flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=leaders)]))
+    item = report.stocks[0]
+
+    assert item.action == "BUY_PROBE"
+    assert item.execution is not None
+    assert item.execution.decision_state == "buy_probe"
+    assert item.execution.buy_zone_low is not None
+    assert item.execution.buy_zone_low <= item.price <= item.execution.buy_zone_high
+    assert "小仓" in item.execution.decision_reason
+
+
+def test_stock_execution_waits_when_price_hits_but_direction_not_confirmed():
+    leaders = [stock("002747", "埃斯顿", role="leader", score=86, change_pct=2.5)]
+    candidate = direction(
+        "candidate",
+        [],
+        probability=66,
+        low_buy=58,
+        linked_stocks=leaders,
+        factor_scores={"history_days": 2, "persistence": 55, "impulse_risk": 35, "seven_day_score": 58},
+    )
+    report = build_quant_decision_report(flow_report([candidate]))
+    item = report.stocks[0]
+
+    assert item.action == "WAIT_CONFIRMATION"
+    assert item.execution is not None
+    assert item.execution.decision_state == "wait_confirmation"
+    assert any(condition.key == "direction_phase" and condition.status == "pending" for condition in item.execution.conditions)
+    assert "价格到了" in item.execution.decision_reason
+
+
+
+def test_stock_execution_does_not_upgrade_weak_verifier_to_buy():
+    weak = [stock("002050", "三花智控", role="expansion", score=68, change_pct=2.5)]
+    report = build_quant_decision_report(flow_report([direction("confirmed_mainline", [], probability=78, low_buy=70, linked_stocks=weak)]))
+    item = report.stocks[0]
+
+    assert item.action == "WAIT_CONFIRMATION"
+    assert item.execution is not None
+    assert any(condition.key == "stock_quality" and condition.status == "pending" for condition in item.execution.conditions)
+    assert "验证方向" in item.execution.conditions[-1].reason

@@ -315,6 +315,32 @@ export interface QuantEtfDecision {
   risk_flags: string[];
 }
 
+export interface QuantStockExecutionCondition {
+  key: string;
+  label: string;
+  status: string;
+  value: string | null;
+  threshold: string | null;
+  reason: string;
+}
+
+export interface QuantStockExecutionPlan {
+  decision_state: string;
+  decision_label: string;
+  decision_reason: string;
+  order_style: string;
+  buy_zone_low: number | null;
+  buy_zone_high: number | null;
+  avoid_above: number | null;
+  stop_price: number | null;
+  take_profit_price: number | null;
+  trigger_signal: string;
+  invalidation_signal: string;
+  position_plan: string;
+  conditions: QuantStockExecutionCondition[];
+  blockers: string[];
+}
+
 export interface QuantStockDecision {
   code: string;
   name: string;
@@ -331,6 +357,7 @@ export interface QuantStockDecision {
   main_net_inflow: number | null;
   main_net_inflow_pct: number | null;
   source_time: string | null;
+  execution: QuantStockExecutionPlan | null;
   reasons: string[];
   risk_flags: string[];
 }

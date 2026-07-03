@@ -42,7 +42,7 @@ input {
 }
 
 .excel-sheet {
-  width: max(1160px, 100%);
+  width: max(1580px, 100%);
   border-collapse: collapse;
   table-layout: fixed;
   background: #fff;
@@ -68,7 +68,23 @@ input {
 }
 
 .stock-col {
-  width: 360px;
+  width: 210px;
+}
+
+.price-col {
+  width: 150px;
+}
+
+.zone-col {
+  width: 170px;
+}
+
+.trigger-col {
+  width: 310px;
+}
+
+.risk-col {
+  width: 160px;
 }
 
 .action-col {
@@ -162,6 +178,21 @@ input {
   color: #666;
 }
 
+.action-buy_probe {
+  color: #107c10;
+}
+
+.action-wait_confirmation,
+.action-wait_buy_zone,
+.action-wait_pullback {
+  color: #b26a00;
+}
+
+.action-no_buy,
+.action-monitor {
+  color: #666;
+}
+
 .sheet-error {
   color: #c00000;
 }
@@ -189,6 +220,6 @@ input {
   }
 
   .excel-sheet {
-    width: 1160px;
+    width: 1580px;
   }
 }

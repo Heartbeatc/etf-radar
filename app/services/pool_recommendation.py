@@ -14,8 +14,22 @@ from app.domain.models import (
 )
 
 MIN_PROMOTION_SCORE = 58
+MIN_PROMOTION_LOW_BUY_SCORE = 58
 MAX_DIRECTION_SCAN = 6
 MAX_WATCH_ITEMS = 9
+CROSS_BORDER_ETF_KEYWORDS = ("港股", "港股通", "恒生", "中概", "H股", "香港", "纳斯达克", "标普", "日经", "德国")
+A_SHARE_PREFERRED_DIRECTIONS = {
+    "innovative_drug",
+    "semiconductor",
+    "ai_compute",
+    "gold_resources",
+    "robotics_highend",
+    "new_energy",
+    "brokerage_finance",
+    "consumer",
+    "dividend_value",
+    "broad_index",
+}
 
 
 def build_pool_recommendation_report(
@@ -25,7 +39,7 @@ def build_pool_recommendation_report(
 ) -> PoolRecommendationResponse:
     current_roles = _current_roles(settings)
     scored = _score_market_candidates(market_flow)
-    eligible = [item for item in scored if item.score >= MIN_PROMOTION_SCORE and item.action != "avoid"]
+    eligible = [item for item in scored if item.score >= MIN_PROMOTION_SCORE and item.action != "avoid" and _is_promotable(item)]
     recommended_main, recommended_backup = _select_recommendations(eligible)
     selected_codes = [*recommended_main, *recommended_backup]
     selected = set(selected_codes)
@@ -49,7 +63,7 @@ def build_pool_recommendation_report(
     warnings = _warnings(market_flow, current_roles, recommended_main + recommended_backup)
     return PoolRecommendationResponse(
         generated_at=datetime.now(timezone.utc),
-        source="market_flow_quant_pool_model_v1",
+        source="market_flow_quant_pool_model_v2",
         status=status,
         current_main_codes=settings.main_codes,
         current_backup_codes=settings.backup_codes,
@@ -59,6 +73,8 @@ def build_pool_recommendation_report(
         warnings=warnings,
         assumptions=[
             "量化候选来自市场方向、ETF载体适配、低吸适配和风险惩罚的合成评分。",
+            "只有确认主线或候选主线，且低吸适配和载体质量通过闸门，才允许晋级为主ETF/备选ETF。",
+            "单日热点方向只输出关联观察，不晋级为交易候选。",
             "该接口只输出 2 个主 ETF + 1 个备选 ETF，不自动修改配置，也不自动下单。",
             "量化入选的 ETF 会进入动作计算链路，生成低吸、止盈、防守和风控提示。",
             "免费数据源无法证明真实资金身份，资金驻留仍需多日验证或付费L2数据增强。",
@@ -109,8 +125,9 @@ def _score_candidate(direction: MarketDirection, candidate: DiscoveryEtfCandidat
         score += 2
         reasons.append("方向处于候选主线")
     elif direction.state == "hot_today":
-        score -= 5
+        score -= 14
         risk_flags.append("今日强但还未验证次日承接")
+        risk_flags.append("单日热点不允许晋级为主ETF")
     elif direction.state in {"weakening", "weak_direction"}:
         score -= 18
         risk_flags.append("方向弱化，不适合作为当前量化候选")
@@ -130,6 +147,14 @@ def _score_candidate(direction: MarketDirection, candidate: DiscoveryEtfCandidat
     elif direction.trade_action == "avoid_or_reduce":
         score -= 18
         risk_flags.append("方向建议回避或降仓")
+
+    if direction.direction_key in A_SHARE_PREFERRED_DIRECTIONS:
+        if _is_cross_border_etf(candidate.name):
+            score -= 14
+            risk_flags.append("A股方向优先A股场内ETF，跨境/港股载体降权")
+        else:
+            score += 5
+            reasons.append("A股方向匹配A股场内ETF")
 
     if candidate.entry_bias == "pullback_watch":
         score += 6
@@ -265,6 +290,22 @@ def _select_recommendations(eligible: list[PoolRecommendationItem]) -> tuple[lis
     return main_codes, backup[:1]
 
 
+def _is_promotable(item: PoolRecommendationItem) -> bool:
+    if item.direction_state not in {"confirmed_mainline", "candidate"}:
+        return False
+    if (item.mainline_probability or 0) < 64:
+        return False
+    if (item.low_buy_readiness_score or 0) < MIN_PROMOTION_LOW_BUY_SCORE:
+        return False
+    if (item.carrier_score or 0) < 58:
+        return False
+    if item.premium_pct is not None and abs(item.premium_pct) >= 1.5:
+        return False
+    if item.amount is not None and item.amount < 80_000_000:
+        return False
+    return True
+
+
 def _recommended_role(code: str, main_codes: list[str], backup_codes: list[str]) -> str | None:
     if code in main_codes:
         return "main"
@@ -300,10 +341,17 @@ def _status(current_roles: dict[str, str], recommended_main: list[str], recommen
     return "partial_rotate"
 
 
+def _is_cross_border_etf(name: str) -> bool:
+    normalized = name.upper()
+    return any(keyword.upper() in normalized for keyword in CROSS_BORDER_ETF_KEYWORDS)
+
+
 def _warnings(market_flow: MarketFlowResponse, current_roles: dict[str, str], recommended_codes: list[str]) -> list[str]:
     warnings: list[str] = []
     if market_flow.directions and all(item.state != "confirmed_mainline" for item in market_flow.directions[:3]):
         warnings.append("当前没有确认主线，量化候选只能视为观察清单，不宜自动执行。")
+    if market_flow.directions and all(item.state not in {"confirmed_mainline", "candidate"} for item in market_flow.directions[:3]):
+        warnings.append("前排方向未通过多日驻留闸门，ETF不会晋级为主ETF。")
     missing = [code for code in recommended_codes if code not in current_roles]
     if missing:
         warnings.append(f"推荐ETF {', '.join(missing)} 来自动态量化筛选，不是配置硬编码。")

@@ -1,0 +1,134 @@
+from datetime import datetime, timezone
+
+from app.core.config import Settings
+from app.domain.models import DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, PoolRecommendationResponse
+from app.services.market_flow import _apply_probability_evidence_cap
+from app.services.pool_recommendation import build_pool_recommendation_report
+from app.services.quant_decision import _etf_decisions
+
+
+def etf(code: str, name: str, *, score: int = 76, mapping_score: int = 76, premium_pct: float = 0.2, amount: float = 300_000_000) -> DiscoveryEtfCandidate:
+    return DiscoveryEtfCandidate(
+        code=code,
+        name=name,
+        direction_key="robotics_highend",
+        direction_label="机器人/高端制造",
+        score=score,
+        price=1.0,
+        amount=amount,
+        volume_ratio=1.2,
+        main_net_inflow_pct=3.0,
+        premium_pct=premium_pct,
+        entry_bias="watch_low_buy",
+        mapping_score=mapping_score,
+        evidence=["test"],
+        risk_flags=[],
+    )
+
+
+def direction(state: str, linked_etfs: list[DiscoveryEtfCandidate], *, probability: int = 82, low_buy: int = 68) -> MarketDirection:
+    return MarketDirection(
+        direction_key="robotics_highend",
+        direction_label="机器人/高端制造",
+        score=probability,
+        state=state,
+        board_count=3,
+        positive_board_count=3,
+        total_amount=8_000_000_000,
+        main_net_inflow=1_200_000_000,
+        avg_change_pct=3.2,
+        breadth_pct=66,
+        linked_etfs=linked_etfs,
+        main_etfs=linked_etfs[:2],
+        backup_etf=linked_etfs[2] if len(linked_etfs) > 2 else None,
+        top_boards=[],
+        factor_scores={"history_days": 3, "persistence": 70, "impulse_risk": 35},
+        mainline_probability=probability,
+        residency_score=72,
+        retention_score=70,
+        etf_confirmation_score=72,
+        low_buy_readiness_score=low_buy,
+        capital_status="资金驻留已确认" if state == "confirmed_mainline" else "今日资金集中，等待次日承接",
+        trade_action="low_buy_allowed" if state == "confirmed_mainline" else "observe_next_day_retention",
+        evidence=["test"],
+        risk_flags=[],
+    )
+
+
+def flow_report(directions: list[MarketDirection]) -> MarketFlowResponse:
+    return MarketFlowResponse(
+        generated_at=datetime.now(timezone.utc),
+        source="test",
+        board_count=3,
+        stock_sample_count=0,
+        directions=directions,
+        warnings=[],
+        assumptions=[],
+    )
+
+
+def empty_pool(items) -> PoolRecommendationResponse:
+    return PoolRecommendationResponse(
+        generated_at=datetime.now(timezone.utc),
+        source="test",
+        status="no_recommendation",
+        current_main_codes=[],
+        current_backup_codes=[],
+        recommended_main_codes=[],
+        recommended_backup_codes=[],
+        items=items,
+        warnings=[],
+        assumptions=[],
+    )
+
+
+def test_mainline_probability_is_capped_without_multi_day_evidence():
+    capped, cap = _apply_probability_evidence_cap(
+        probability=92,
+        history_days=1,
+        residency=82,
+        retention=80,
+        flow_proxy=70,
+        breadth_score=70,
+        evidence_quality=80,
+        linked_etfs=[etf("159770", "机器人ETF")],
+        linked_stocks=[],
+        impulse_risk=35,
+        intraday_strength=84,
+        low_buy_readiness=70,
+    )
+
+    assert cap == 52
+    assert capped == 52
+
+
+def test_hot_today_etf_stays_watch_only_not_promoted():
+    hot = direction("hot_today", [etf("159770", "机器人ETF"), etf("562500", "机器人ETF")], probability=76, low_buy=62)
+    report = build_pool_recommendation_report(Settings(main_etf_codes="", backup_etf_codes=""), flow_report([hot]), {})
+
+    assert report.recommended_main_codes == []
+    assert report.recommended_backup_codes == []
+    assert report.items
+    assert all(item.recommended_role is None for item in report.items)
+    assert any("不会晋级" in warning for warning in report.warnings)
+
+
+def test_decision_keeps_strong_related_etfs_as_observation_when_not_promoted():
+    hot = direction("hot_today", [etf("159770", "机器人ETF")], probability=76, low_buy=62)
+    report = build_pool_recommendation_report(Settings(main_etf_codes="", backup_etf_codes=""), flow_report([hot]), {})
+    decisions = _etf_decisions(empty_pool(report.items), actions=type("Actions", (), {"items": []})())
+
+    assert decisions
+    assert decisions[0].role is None
+    assert "只看不买" in decisions[0].operation
+
+
+def test_a_share_direction_penalizes_cross_border_carrier():
+    domestic = etf("159770", "机器人ETF", score=70, mapping_score=70)
+    cross_border = etf("513000", "港股机器人ETF", score=90, mapping_score=90)
+    confirmed = direction("confirmed_mainline", [cross_border, domestic], probability=84, low_buy=70)
+    report = build_pool_recommendation_report(Settings(main_etf_codes="", backup_etf_codes=""), flow_report([confirmed]), {})
+    by_code = {item.code: item for item in report.items}
+
+    assert by_code["513000"].score < by_code["159770"].score
+    assert "159770" in report.recommended_main_codes

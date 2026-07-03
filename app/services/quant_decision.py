@@ -109,6 +109,8 @@ def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
 def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResponse) -> list[QuantEtfDecision]:
     action_by_code = {item.code: item for item in actions.items}
     selected = [item for item in pool.items if item.recommended_role in {"main", "backup"}]
+    if not selected:
+        selected = pool.items[:3]
     result: list[QuantEtfDecision] = []
     for item in selected[:5]:
         fixed_action = action_by_code.get(item.code)
@@ -122,11 +124,15 @@ def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResp
 def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
     suggested_position_pct = None
     operation = "空仓候选：等待低吸区、防守线和承接信号同时满足后再决定。"
-    if item.direction_state == "confirmed_mainline" and item.low_buy_readiness_score and item.low_buy_readiness_score >= 65:
+    if item.recommended_role is None:
+        operation = "强关联观察ETF：方向或低吸闸门未通过，只看不买。"
+    elif item.direction_state == "confirmed_mainline" and item.low_buy_readiness_score and item.low_buy_readiness_score >= 65:
         suggested_position_pct = 20
         operation = "空仓开仓候选；入池后等待低吸触发，首仓上限20%，未触发不买。"
     elif item.direction_state == "candidate":
         operation = "方向候选载体，先等回踩和多日承接；未确认前不追。"
+    elif item.direction_state == "hot_today":
+        operation = "单日热点关联ETF，等待次日承接，不作为开仓信号。"
     return QuantEtfDecision(
         code=item.code,
         name=item.name,

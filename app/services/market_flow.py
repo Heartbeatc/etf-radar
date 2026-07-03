@@ -704,7 +704,21 @@ def _direction_factor_scores(
         + persistence * 0.24
         + evidence_quality * 0.08
     )
-    mainline_probability = _clamp(raw_probability - max(0, impulse_risk - 45) * 0.40)
+    uncapped_probability = _clamp(raw_probability - max(0, impulse_risk - 45) * 0.40)
+    mainline_probability, evidence_cap = _apply_probability_evidence_cap(
+        probability=uncapped_probability,
+        history_days=history_stats.days_count,
+        residency=_clamp(residency),
+        retention=retention,
+        flow_proxy=flow_proxy,
+        breadth_score=breadth_score,
+        evidence_quality=evidence_quality,
+        linked_etfs=linked_etfs,
+        linked_stocks=linked_stocks,
+        impulse_risk=impulse_risk,
+        intraday_strength=intraday_strength,
+        low_buy_readiness=low_buy_readiness,
+    )
 
     return {
         "capital_weight": capital_weight,
@@ -724,6 +738,8 @@ def _direction_factor_scores(
         "impulse_risk": impulse_risk,
         "evidence_quality": evidence_quality,
         "raw_mainline_probability": raw_probability,
+        "uncapped_mainline_probability": uncapped_probability,
+        "evidence_cap": evidence_cap,
         "low_buy_readiness": low_buy_readiness,
         "mainline_probability": mainline_probability,
     }, concentration_pct
@@ -760,6 +776,55 @@ def _low_buy_readiness(etfs: list[DiscoveryEtfCandidate], relative_strength: int
             entry_scores.append(50)
     entry = max(entry_scores) if entry_scores else 45
     return _clamp(entry * 0.44 + flow_proxy * 0.22 + breadth_score * 0.18 + min(relative_strength, 70) * 0.16)
+
+
+def _apply_probability_evidence_cap(
+    *,
+    probability: int,
+    history_days: int,
+    residency: int,
+    retention: int,
+    flow_proxy: int,
+    breadth_score: int,
+    evidence_quality: int,
+    linked_etfs: list[DiscoveryEtfCandidate],
+    linked_stocks: list[MarketStockCandidate],
+    impulse_risk: int,
+    intraday_strength: int,
+    low_buy_readiness: int,
+) -> tuple[int, int]:
+    cap = 100
+    if history_days < 2:
+        cap = min(cap, 52)
+    elif history_days < 3:
+        cap = min(cap, 66)
+    if residency < 55:
+        cap = min(cap, 58)
+    elif residency < 62:
+        cap = min(cap, 68)
+    if retention < 55:
+        cap = min(cap, 58)
+    elif retention < 62:
+        cap = min(cap, 68)
+    if flow_proxy < 45:
+        cap = min(cap, 55)
+    if breadth_score < 48:
+        cap = min(cap, 58)
+    if evidence_quality < 55:
+        cap = min(cap, 60)
+    if not linked_etfs:
+        cap = min(cap, 62)
+    if not linked_stocks:
+        cap = min(cap, 66)
+    if impulse_risk >= 70:
+        cap = min(cap, 50)
+    elif impulse_risk >= 60:
+        cap = min(cap, 58)
+    elif impulse_risk >= 50:
+        cap = min(cap, 68)
+    if intraday_strength >= 76 and low_buy_readiness < 45:
+        cap = min(cap, 55)
+    return min(probability, cap), cap
 
 
 def _quant_direction_state(factors: dict[str, int], inflow: float) -> str:
@@ -848,6 +913,8 @@ def _quant_risks(factors: dict[str, int], state: str, etfs: list[DiscoveryEtfCan
         risks.append("缺少3个交易日以上方向驻留样本")
     if factors.get("impulse_risk", 0) >= 60:
         risks.append("一日脉冲/热点噪声风险较高，不能按主线处理")
+    if factors.get("evidence_cap", 100) < factors.get("uncapped_mainline_probability", factors.get("mainline_probability", 0)):
+        risks.append("证据闸门已压低主线概率，当前只能按降级信号处理")
     if factors["residency"] < 58 and factors["intraday_strength"] >= 70:
         risks.append("单日强度不足以证明资金驻留")
     if factors["flow_proxy"] < 45:

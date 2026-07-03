@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Any
 
 from app.core.market import MARKET_TZ
-from app.domain.models import AccountInput, AccountState, AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionExitInput, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan, TradeRecord
+from app.domain.models import AccountInput, AccountState, AlertEvent, AiSummaryItem, AiTradeRiskReview, DailyBar, EtfSnapshot, EventItem, MarketFlowResponse, MinuteBar, Position, PositionAdjustInput, PositionAdjustRecord, PositionExitInput, PositionInput, QuantFrameworkResponse, QuantSignalRecord, SignalRecord, SourceStatus, TradePlan, TradeRecord
 
 
 class Store:
@@ -108,6 +108,30 @@ class Store:
                 );
                 create index if not exists idx_closed_trades_code_time on closed_trades(code, closed_at desc);
                 create index if not exists idx_closed_trades_time on closed_trades(closed_at desc);
+
+                create table if not exists position_trade_events (
+                    id integer primary key autoincrement,
+                    code text not null,
+                    side text not null,
+                    price real not null,
+                    shares real not null,
+                    trade_date text not null,
+                    fee real not null default 0,
+                    cash_delta real,
+                    average_cost_before real,
+                    average_cost_after real,
+                    shares_before real,
+                    shares_after real,
+                    realized_profit_amount real,
+                    realized_profit_pct real,
+                    reason text not null default '',
+                    note text not null default '',
+                    created_at text not null,
+                    source text not null default 'manual',
+                    payload text not null
+                );
+                create index if not exists idx_position_trade_events_code_time on position_trade_events(code, created_at desc);
+                create index if not exists idx_position_trade_events_time on position_trade_events(created_at desc);
 
                 create table if not exists signal_history (
                     id integer primary key autoincrement,
@@ -504,6 +528,202 @@ class Store:
                 (code, position.entry_price, position.shares, position.entry_date, position.note, updated_at.isoformat()),
             )
         return Position(code=code, updated_at=updated_at, **position.model_dump())
+
+    def adjust_position(self, code: str, adjustment: PositionAdjustInput) -> PositionAdjustRecord:
+        trade_date = adjustment.trade_date or datetime.now(MARKET_TZ).date().isoformat()
+        try:
+            date.fromisoformat(trade_date)
+        except ValueError:
+            raise ValueError("trade_date must be YYYY-MM-DD")
+
+        if adjustment.side == "sell":
+            return self._sell_adjustment(code, adjustment, trade_date)
+        return self._buy_adjustment(code, adjustment, trade_date)
+
+    def _buy_adjustment(self, code: str, adjustment: PositionAdjustInput, trade_date: str) -> PositionAdjustRecord:
+        created_at = datetime.now(timezone.utc)
+        cash_delta = -(adjustment.price * adjustment.shares + adjustment.fee)
+        with self._lock, self._connect() as conn:
+            row = conn.execute("select * from positions where code = ?", (code,)).fetchone()
+            position = self._position_from_row(row) if row else None
+            if position is not None and position.shares is None:
+                raise ValueError("existing position has no shares; correct it before adding")
+
+            shares_before = position.shares if position else 0.0
+            average_cost_before = position.entry_price if position else None
+            shares_after = shares_before + adjustment.shares
+            previous_cost = (position.entry_price * shares_before) if position else 0.0
+            average_cost_after = (previous_cost + adjustment.price * adjustment.shares + adjustment.fee) / shares_after
+            entry_date = position.entry_date if position and position.entry_date else trade_date
+            note = adjustment.note.strip() or (position.note if position else "")
+
+            account_row = conn.execute("select cash_balance from account_state where id = 1").fetchone()
+            actual_cash_delta = None
+            if account_row is not None:
+                cash_after = account_row["cash_balance"] + cash_delta
+                if cash_after < -0.000001:
+                    raise ValueError("cash balance would become negative")
+                conn.execute(
+                    "update account_state set cash_balance = ?, updated_at = ? where id = 1",
+                    (max(0, cash_after), created_at.isoformat()),
+                )
+                conn.execute(
+                    """
+                    insert into cash_ledger(event_at, event_type, cash_delta, cash_balance_after, ref_code, note, payload)
+                    values (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        created_at.isoformat(),
+                        "buy_debit",
+                        cash_delta,
+                        max(0, cash_after),
+                        code,
+                        adjustment.reason.strip(),
+                        adjustment.model_dump_json(),
+                    ),
+                )
+                actual_cash_delta = cash_delta
+
+            conn.execute(
+                """
+                insert into positions(code, entry_price, shares, entry_date, note, updated_at) values (?, ?, ?, ?, ?, ?)
+                on conflict(code) do update set
+                    entry_price = excluded.entry_price,
+                    shares = excluded.shares,
+                    entry_date = excluded.entry_date,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (code, average_cost_after, shares_after, entry_date, note, created_at.isoformat()),
+            )
+            payload = {
+                "adjustment": adjustment.model_dump(mode="json"),
+                "cash_account_present": account_row is not None,
+            }
+            cursor = conn.execute(
+                """
+                insert into position_trade_events(
+                    code, side, price, shares, trade_date, fee, cash_delta, average_cost_before, average_cost_after,
+                    shares_before, shares_after, realized_profit_amount, realized_profit_pct, reason, note, created_at, source, payload
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    "buy",
+                    adjustment.price,
+                    adjustment.shares,
+                    trade_date,
+                    adjustment.fee,
+                    actual_cash_delta,
+                    average_cost_before,
+                    average_cost_after,
+                    shares_before,
+                    shares_after,
+                    None,
+                    None,
+                    adjustment.reason.strip(),
+                    adjustment.note.strip(),
+                    created_at.isoformat(),
+                    "manual",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+        return PositionAdjustRecord(
+            id=int(cursor.lastrowid),
+            code=code,
+            side="buy",
+            price=adjustment.price,
+            shares=adjustment.shares,
+            trade_date=trade_date,
+            fee=adjustment.fee,
+            cash_delta=actual_cash_delta,
+            average_cost_before=average_cost_before,
+            average_cost_after=average_cost_after,
+            shares_before=shares_before,
+            shares_after=shares_after,
+            reason=adjustment.reason.strip(),
+            note=adjustment.note.strip(),
+            created_at=created_at,
+        )
+
+    def _sell_adjustment(self, code: str, adjustment: PositionAdjustInput, trade_date: str) -> PositionAdjustRecord:
+        position_before = self.positions().get(code)
+        if position_before is None:
+            raise KeyError(code)
+        if position_before.shares is None:
+            raise ValueError("existing position has no shares; correct it before selling")
+        account_present = self.account_state() is not None
+        trade = self.close_position(
+            code,
+            PositionExitInput(
+                exit_price=adjustment.price,
+                shares=adjustment.shares,
+                exit_date=trade_date,
+                reason=adjustment.reason,
+                note=adjustment.note,
+                fee=adjustment.fee,
+            ),
+        )
+        position_after = self.positions().get(code)
+        created_at = trade.closed_at
+        shares_after = position_after.shares if position_after else None
+        average_cost_after = position_after.entry_price if position_after else None
+        actual_cash_delta = adjustment.price * adjustment.shares - adjustment.fee if account_present else None
+        payload = {
+            "adjustment": adjustment.model_dump(mode="json"),
+            "closed_trade_id": trade.id,
+            "cash_account_present": account_present,
+        }
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                insert into position_trade_events(
+                    code, side, price, shares, trade_date, fee, cash_delta, average_cost_before, average_cost_after,
+                    shares_before, shares_after, realized_profit_amount, realized_profit_pct, reason, note, created_at, source, payload
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    code,
+                    "sell",
+                    adjustment.price,
+                    adjustment.shares,
+                    trade_date,
+                    adjustment.fee,
+                    actual_cash_delta,
+                    position_before.entry_price,
+                    average_cost_after,
+                    position_before.shares,
+                    shares_after,
+                    trade.realized_profit_amount,
+                    trade.realized_profit_pct,
+                    adjustment.reason.strip(),
+                    adjustment.note.strip(),
+                    created_at.isoformat(),
+                    "manual",
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+        return PositionAdjustRecord(
+            id=int(cursor.lastrowid),
+            code=code,
+            side="sell",
+            price=adjustment.price,
+            shares=adjustment.shares,
+            trade_date=trade_date,
+            fee=adjustment.fee,
+            cash_delta=actual_cash_delta,
+            average_cost_before=position_before.entry_price,
+            average_cost_after=average_cost_after,
+            shares_before=position_before.shares,
+            shares_after=shares_after,
+            realized_profit_amount=trade.realized_profit_amount,
+            realized_profit_pct=trade.realized_profit_pct,
+            reason=adjustment.reason.strip(),
+            note=adjustment.note.strip(),
+            created_at=created_at,
+        )
 
     def close_position(self, code: str, exit_input: PositionExitInput) -> TradeRecord:
         closed_at = datetime.now(timezone.utc)

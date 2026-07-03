@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AccountInput, PortfolioSnapshotResponse, PositionExitInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
+import type { AccountInput, PortfolioSnapshotResponse, PositionAdjustInput, PositionInput, QuantDecisionResponse, QuantDirectionDecision, QuantHoldingDecision, QuantStockDecision, TradeJournalResponse } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
@@ -11,11 +11,11 @@ interface QuantWorkbenchProps {
   onLogout: () => void;
   onSaveAccount: (input: AccountInput) => void;
   onSavePosition: (code: string, input: PositionInput) => void;
-  onClosePosition: (code: string, input: PositionExitInput) => void;
+  onAdjustPosition: (code: string, input: PositionAdjustInput) => void;
   onDeletePosition: (code: string) => void;
   savingAccount: boolean;
   savingPosition: boolean;
-  closingPosition: boolean;
+  adjustingPosition: boolean;
   deletingPosition: boolean;
   errorMessage: string | null;
 }
@@ -29,11 +29,11 @@ export function QuantWorkbench({
   onLogout,
   onSaveAccount,
   onSavePosition,
-  onClosePosition,
+  onAdjustPosition,
   onDeletePosition,
   savingAccount,
   savingPosition,
-  closingPosition,
+  adjustingPosition,
   deletingPosition,
   errorMessage
 }: QuantWorkbenchProps) {
@@ -132,14 +132,14 @@ export function QuantWorkbench({
             <HoldingRow
               key={holding.code}
               item={holding}
-              onClose={onClosePosition}
+              onAdjust={onAdjustPosition}
               onDelete={onDeletePosition}
-              closing={closingPosition}
+              adjusting={adjustingPosition}
               deleting={deletingPosition}
             />
           ))}
           {holdings.length === 0 && candidates.map((stock) => (
-            <CandidateRow key={stock.code} item={stock} />
+            <CandidateRow key={stock.code} item={stock} onAdjust={onAdjustPosition} adjusting={adjustingPosition} />
           ))}
           {holdings.length === 0 && candidates.length === 0 ? <EmptyRow /> : null}
         </tbody>
@@ -246,61 +246,45 @@ function TradeSummaryRow({ journal }: { journal?: TradeJournalResponse }) {
 
 function HoldingRow({
   item,
-  onClose,
+  onAdjust,
   onDelete,
-  closing,
+  adjusting,
   deleting
 }: {
   item: QuantHoldingDecision;
-  onClose: (code: string, input: PositionExitInput) => void;
+  onAdjust: (code: string, input: PositionAdjustInput) => void;
   onDelete: (code: string) => void;
-  closing: boolean;
+  adjusting: boolean;
   deleting: boolean;
 }) {
-  const close = () => {
-    const priceText = window.prompt(`卖出价格：${item.code} ${item.name}`, item.current_price ? item.current_price.toFixed(2) : '');
-    if (priceText === null) return;
-    const exitPrice = Number(priceText);
-    if (!Number.isFinite(exitPrice) || exitPrice <= 0) {
-      window.alert('请输入有效卖出价格');
-      return;
-    }
-
-    const sharesText = window.prompt('卖出数量，留空表示全部平仓', item.shares ? String(item.shares) : '');
-    if (sharesText === null) return;
-    const parsedShares = sharesText.trim() ? Number(sharesText) : null;
-    if (parsedShares !== null && (!Number.isFinite(parsedShares) || parsedShares <= 0)) {
-      window.alert('卖出数量必须大于0，或留空');
-      return;
-    }
-
-    const exitDate = window.prompt('卖出日期', todayText()) ?? todayText();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(exitDate)) {
-      window.alert('卖出日期格式必须是 YYYY-MM-DD');
-      return;
-    }
-
-    const feeText = window.prompt('手续费/税费，留空为0', '0');
-    if (feeText === null) return;
-    const fee = feeText.trim() ? Number(feeText) : 0;
-    if (!Number.isFinite(fee) || fee < 0) {
-      window.alert('费用不能为负数');
-      return;
-    }
-
-    const reason = window.prompt('卖出原因：止损 / 止盈 / 手动 / 风控', item.action_label) ?? '';
-    onClose(item.code, {
-      exit_price: exitPrice,
-      shares: parsedShares,
-      exit_date: exitDate,
-      reason: reason.trim(),
-      note: item.exit_plan,
-      fee
+  const addPosition = () => {
+    const input = promptAdjustment({
+      side: 'buy',
+      code: item.code,
+      name: item.name,
+      defaultPrice: item.current_price,
+      defaultShares: null,
+      defaultReason: '加仓',
+      defaultNote: item.action_label
     });
+    if (input) onAdjust(item.code, input);
+  };
+
+  const reducePosition = () => {
+    const input = promptAdjustment({
+      side: 'sell',
+      code: item.code,
+      name: item.name,
+      defaultPrice: item.current_price,
+      defaultShares: item.shares,
+      defaultReason: item.action_label,
+      defaultNote: item.exit_plan
+    });
+    if (input) onAdjust(item.code, input);
   };
 
   const deleteWithoutJournal = () => {
-    if (window.confirm('只在录错持仓时删除。真实卖出请用“卖出记录”，否则收益不会入账。')) {
+    if (window.confirm('只在录错持仓时删除。真实卖出请用“减仓/卖出”，否则收益不会入账。')) {
       onDelete(item.code);
     }
   };
@@ -329,7 +313,8 @@ function HoldingRow({
         <span>{shortText(item.exit_plan, 42)}</span>
         {item.ai_risk_review ? <span className={`ai-risk ai-risk-${item.ai_risk_review.risk_level}`}>AI {shortText(item.ai_risk_review.conclusion, 34)}</span> : null}
         <span className="row-actions">
-          <button type="button" className="link-button primary-link" onClick={close} disabled={closing}>卖出记录</button>
+          <button type="button" className="link-button primary-link" onClick={addPosition} disabled={adjusting}>加仓</button>
+          <button type="button" className="link-button primary-link" onClick={reducePosition} disabled={adjusting}>减仓/卖出</button>
           <button type="button" className="link-button" onClick={deleteWithoutJournal} disabled={deleting}>删除不记账</button>
         </span>
       </td>
@@ -337,8 +322,28 @@ function HoldingRow({
   );
 }
 
-function CandidateRow({ item }: { item: QuantStockDecision }) {
+function CandidateRow({
+  item,
+  onAdjust,
+  adjusting
+}: {
+  item: QuantStockDecision;
+  onAdjust: (code: string, input: PositionAdjustInput) => void;
+  adjusting: boolean;
+}) {
   const execution = item.execution;
+  const buy = () => {
+    const input = promptAdjustment({
+      side: 'buy',
+      code: item.code,
+      name: item.name,
+      defaultPrice: item.price,
+      defaultShares: null,
+      defaultReason: '候选买入',
+      defaultNote: execution?.decision_reason ?? item.operation
+    });
+    if (input) onAdjust(item.code, input);
+  };
   return (
     <tr>
       <td>候选</td>
@@ -358,9 +363,74 @@ function CandidateRow({ item }: { item: QuantStockDecision }) {
         <strong>{execution?.decision_state === 'buy_probe' ? '可试仓' : '等待'}</strong>
         <span>防守 {priceText(execution?.stop_price)} / 止盈 {priceText(execution?.take_profit_price)}</span>
       </td>
-      <td>{shortText(execution?.decision_reason ?? item.operation, 46)}</td>
+      <td>
+        {shortText(execution?.decision_reason ?? item.operation, 46)}
+        <span className="row-actions">
+          <button type="button" className="link-button primary-link" onClick={buy} disabled={adjusting}>买入记录</button>
+        </span>
+      </td>
     </tr>
   );
+}
+
+function promptAdjustment({
+  side,
+  code,
+  name,
+  defaultPrice,
+  defaultShares,
+  defaultReason,
+  defaultNote
+}: {
+  side: 'buy' | 'sell';
+  code: string;
+  name?: string | null;
+  defaultPrice?: number | null;
+  defaultShares?: number | null;
+  defaultReason: string;
+  defaultNote: string;
+}): PositionAdjustInput | null {
+  const sideLabel = side === 'buy' ? '买入/加仓' : '减仓/卖出';
+  const priceText = window.prompt(`${sideLabel}价格：${code} ${name ?? ''}`, defaultPrice ? defaultPrice.toFixed(2) : '');
+  if (priceText === null) return null;
+  const price = Number(priceText);
+  if (!Number.isFinite(price) || price <= 0) {
+    window.alert(`请输入有效${sideLabel}价格`);
+    return null;
+  }
+
+  const sharesText = window.prompt(`${sideLabel}数量，必须填写`, defaultShares ? String(defaultShares) : '');
+  if (sharesText === null) return null;
+  const shares = Number(sharesText);
+  if (!Number.isFinite(shares) || shares <= 0) {
+    window.alert(`${sideLabel}数量必须大于0`);
+    return null;
+  }
+
+  const tradeDate = window.prompt(`${sideLabel}日期`, todayText()) ?? todayText();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(tradeDate)) {
+    window.alert('日期格式必须是 YYYY-MM-DD');
+    return null;
+  }
+
+  const feeText = window.prompt('手续费/税费，留空为0', '0');
+  if (feeText === null) return null;
+  const fee = feeText.trim() ? Number(feeText) : 0;
+  if (!Number.isFinite(fee) || fee < 0) {
+    window.alert('费用不能为负数');
+    return null;
+  }
+
+  const reason = window.prompt(`${sideLabel}原因`, defaultReason) ?? defaultReason;
+  return {
+    side,
+    price,
+    shares,
+    trade_date: tradeDate,
+    fee,
+    reason: reason.trim(),
+    note: defaultNote
+  };
 }
 
 function EmptyRow() {

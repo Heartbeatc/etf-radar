@@ -6,7 +6,7 @@ import { ApiError, SESSION_STORAGE_KEY, api } from './api';
 import { QuantWorkbench } from './features/quant/QuantWorkbench';
 import { getErrorMessage } from './shared/errors';
 import { useProtectedQuery } from './shared/useProtectedQuery';
-import type { AccountInput, PositionExitInput } from './types';
+import type { AccountInput, PositionAdjustInput } from './types';
 
 const { Content } = Layout;
 
@@ -96,10 +96,12 @@ function App() {
     onError: (error) => message.error(getErrorMessage(error))
   });
 
-  const closePositionMutation = useMutation({
-    mutationFn: ({ code, input }: { code: string; input: PositionExitInput }) => api.closePosition(sessionToken, code, input),
+  const adjustPositionMutation = useMutation({
+    mutationFn: ({ code, input }: { code: string; input: PositionAdjustInput }) => api.adjustPosition(sessionToken, code, input),
     onSuccess: (record) => {
-      message.success(`已记录卖出：${record.code} ${record.realized_profit_pct.toFixed(2)}%`);
+      const sideLabel = record.side === 'buy' ? '买入/加仓' : '卖出/减仓';
+      const costText = record.average_cost_after == null ? '' : `，成本 ${record.average_cost_after.toFixed(3)}`;
+      message.success(`${sideLabel}已入账：${record.code}${costText}`);
       queryClient.invalidateQueries({ queryKey: ['quant-decision', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['trade-journal', sessionToken] });
       queryClient.invalidateQueries({ queryKey: ['portfolio', sessionToken] });
@@ -152,11 +154,11 @@ function App() {
             onLogout={logout}
             onSaveAccount={(input) => saveAccountMutation.mutate(input)}
             onSavePosition={(code, input) => savePositionMutation.mutate({ code, input })}
-            onClosePosition={(code, input) => closePositionMutation.mutate({ code, input })}
+            onAdjustPosition={(code, input) => adjustPositionMutation.mutate({ code, input })}
             onDeletePosition={(code) => deletePositionMutation.mutate(code)}
             savingAccount={saveAccountMutation.isPending}
             savingPosition={savePositionMutation.isPending}
-            closingPosition={closePositionMutation.isPending}
+            adjustingPosition={adjustPositionMutation.isPending}
             deletingPosition={deletePositionMutation.isPending}
             errorMessage={decisionQuery.error ? getErrorMessage(decisionQuery.error) : tradesQuery.error ? getErrorMessage(tradesQuery.error) : portfolioQuery.error ? getErrorMessage(portfolioQuery.error) : null}
           />

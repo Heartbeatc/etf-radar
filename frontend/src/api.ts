@@ -15,6 +15,8 @@ import type {
   PoolRecommendationResponse,
   PortfolioSnapshotResponse,
   Position,
+  PositionAdjustInput,
+  PositionAdjustRecord,
   PositionExitInput,
   PositionInput,
   PythonQuantStackReport,
@@ -130,6 +132,8 @@ export const api = {
   getPositions: (token: string, signal?: AbortSignal) => requestJson<Position[]>('/api/v1/positions', { token, signal }),
   upsertPosition: (token: string, code: string, input: PositionInput) =>
     requestJson<Position>(`/api/v1/positions/${code}`, { method: 'PUT', token, body: input }),
+  adjustPosition: (token: string, code: string, input: PositionAdjustInput) =>
+    requestJson<PositionAdjustRecord>(`/api/v1/positions/${code}/adjust`, { method: 'POST', token, body: input }),
   closePosition: (token: string, code: string, input: PositionExitInput) =>
     requestJson<TradeRecord>(`/api/v1/positions/${code}/close`, { method: 'POST', token, body: input }),
   getTrades: (token: string, signal?: AbortSignal) => requestJson<TradeJournalResponse>('/api/v1/trades', { token, signal }),

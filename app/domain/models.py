@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -81,6 +81,37 @@ class PositionExitInput(BaseModel):
     reason: str = ""
     note: str = ""
     fee: float = Field(default=0, ge=0)
+
+
+class PositionAdjustInput(BaseModel):
+    side: Literal["buy", "sell"]
+    price: float = Field(gt=0)
+    shares: float = Field(gt=0)
+    trade_date: str | None = None
+    fee: float = Field(default=0, ge=0)
+    reason: str = ""
+    note: str = ""
+
+
+class PositionAdjustRecord(BaseModel):
+    id: int
+    code: str
+    side: Literal["buy", "sell"]
+    price: float
+    shares: float
+    trade_date: str
+    fee: float = 0
+    cash_delta: float | None = None
+    average_cost_before: float | None = None
+    average_cost_after: float | None = None
+    shares_before: float | None = None
+    shares_after: float | None = None
+    realized_profit_amount: float | None = None
+    realized_profit_pct: float | None = None
+    reason: str = ""
+    note: str = ""
+    created_at: datetime
+    source: str = "manual"
 
 
 class TradeRecord(BaseModel):

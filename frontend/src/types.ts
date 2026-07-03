@@ -85,6 +85,37 @@ export interface PositionExitInput {
   fee: number;
 }
 
+export interface PositionAdjustInput {
+  side: 'buy' | 'sell';
+  price: number;
+  shares: number;
+  trade_date: string | null;
+  fee: number;
+  reason: string;
+  note: string;
+}
+
+export interface PositionAdjustRecord {
+  id: number;
+  code: string;
+  side: 'buy' | 'sell';
+  price: number;
+  shares: number;
+  trade_date: string;
+  fee: number;
+  cash_delta: number | null;
+  average_cost_before: number | null;
+  average_cost_after: number | null;
+  shares_before: number | null;
+  shares_after: number | null;
+  realized_profit_amount: number | null;
+  realized_profit_pct: number | null;
+  reason: string;
+  note: string;
+  created_at: string;
+  source: string;
+}
+
 export interface TradeRecord {
   id: number;
   code: string;

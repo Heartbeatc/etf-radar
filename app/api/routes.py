@@ -33,6 +33,8 @@ from app.domain.models import (
     QuantSelfAuditReport,
     QuantValidationReport,
     Position,
+    PositionAdjustInput,
+    PositionAdjustRecord,
     PositionExitInput,
     PositionInput,
     SignalRecord,
@@ -368,6 +370,18 @@ def register_routes(app: FastAPI, runtime: Runtime, settings: Settings) -> None:
         if not normalized.isdigit() or len(normalized) != 6:
             raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
         return runtime.store.upsert_position(normalized, position)
+
+    @app.post("/api/v1/positions/{code}/adjust", response_model=PositionAdjustRecord, dependencies=PROTECTED)
+    async def adjust_position(code: str, adjustment: PositionAdjustInput) -> PositionAdjustRecord:
+        normalized = code.strip()
+        if not normalized.isdigit() or len(normalized) != 6:
+            raise HTTPException(status_code=400, detail="code must be a 6-digit A-share market code")
+        try:
+            return runtime.store.adjust_position(normalized, adjustment)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="position not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @app.post("/api/v1/positions/{code}/close", response_model=TradeRecord, dependencies=PROTECTED)
     async def close_position(code: str, exit_input: PositionExitInput) -> TradeRecord:

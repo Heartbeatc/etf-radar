@@ -220,6 +220,8 @@ export interface MarketDirection {
   residency_score: number;
   retention_score: number;
   etf_confirmation_score: number;
+  stock_confirmation_score?: number;
+  carrier_confirmation_score?: number;
   low_buy_readiness_score: number;
   capital_status: string;
   trade_action: string;
@@ -318,7 +320,15 @@ export interface QuantStockDecision {
   operation: string;
   score: number;
   direction_label: string | null;
+  board_name: string | null;
+  verifier_role: string | null;
+  price: number | null;
   change_pct: number | null;
+  amount: number | null;
+  volume_ratio: number | null;
+  main_net_inflow: number | null;
+  main_net_inflow_pct: number | null;
+  source_time: string | null;
   reasons: string[];
   risk_flags: string[];
 }

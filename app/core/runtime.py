@@ -183,10 +183,11 @@ class Runtime:
                 return cached
         etf_report: DiscoveryResponse | None = None
         event_report: EventCorpusReport | None = None
-        try:
-            etf_report = await self.discovery(force=force)
-        except Exception:
-            etf_report = None
+        if not self.settings.stock_focus_enabled:
+            try:
+                etf_report = await self.discovery(force=force)
+            except Exception:
+                etf_report = None
         if self.settings.event_corpus_enabled and self.settings.event_source_url_list:
             try:
                 event_report = await self.event_corpus(force=force)

@@ -42,7 +42,7 @@ input {
 }
 
 .excel-sheet {
-  width: max(980px, 100%);
+  width: max(1160px, 100%);
   border-collapse: collapse;
   table-layout: fixed;
   background: #fff;
@@ -67,7 +67,11 @@ input {
   width: 210px;
 }
 
-.etf-col {
+.stock-col {
+  width: 360px;
+}
+
+.action-col {
   width: auto;
 }
 
@@ -185,6 +189,6 @@ input {
   }
 
   .excel-sheet {
-    width: 980px;
+    width: 1160px;
   }
 }

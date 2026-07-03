@@ -1,4 +1,4 @@
-import type { QuantDecisionResponse, QuantDirectionDecision, QuantEtfDecision } from '../../types';
+import type { QuantDecisionResponse, QuantDirectionDecision, QuantStockDecision } from '../../types';
 import { formatDateTime, formatScore } from './formatters';
 
 interface QuantWorkbenchProps {
@@ -11,18 +11,20 @@ interface QuantWorkbenchProps {
 
 export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, errorMessage }: QuantWorkbenchProps) {
   const direction = decision?.direction;
-  const etfs = pickEtfs(decision?.etfs ?? []);
+  const stocks = pickStocks(decision?.stocks ?? []);
   const status = capitalStatus(direction);
+  const primaryAction = stocks[0]?.operation ?? decision?.conclusion ?? '等待数据';
 
   return (
     <main className="excel-page">
-      <table className="excel-sheet" aria-label="主线方向表">
+      <table className="excel-sheet" aria-label="A股主线个股表">
         <colgroup>
           <col className="row-index-col" />
           <col className="direction-col" />
           <col className="capital-col" />
           <col className="phase-col" />
-          <col className="etf-col" />
+          <col className="stock-col" />
+          <col className="action-col" />
         </colgroup>
         <thead>
           <tr className="excel-letters">
@@ -31,14 +33,16 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <th>B</th>
             <th>C</th>
             <th>D</th>
+            <th>E</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <th className="row-index">1</th>
-            <td className="sheet-title">主线方向表</td>
+            <td className="sheet-title">A股主线个股表</td>
             <td className="sheet-meta">{formatDateTime(decision?.generated_at)}</td>
             <td className="sheet-meta">30 秒刷新</td>
+            <td className="sheet-meta">{decision?.market_status ?? '-'}</td>
             <td className="sheet-actions">
               <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? '刷新中' : '刷新'}</button>
               <button type="button" onClick={onLogout}>退出</button>
@@ -49,7 +53,8 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td>最近方向</td>
             <td>主力在不在</td>
             <td>目前阶段</td>
-            <td>强关联 ETF</td>
+            <td>强关联个股</td>
+            <td>动作</td>
           </tr>
           <tr>
             <th className="row-index">3</th>
@@ -65,12 +70,16 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
               <strong>{direction?.phase_label ?? '无数据'}</strong>
               <span>{direction?.confidence ? `置信 ${confidenceLabel(direction.confidence)}` : '-'}</span>
             </td>
-            <td>{formatEtfs(etfs)}</td>
+            <td>{formatStocks(stocks)}</td>
+            <td>
+              <strong>{actionLabel(stocks[0]?.action)}</strong>
+              <span>{primaryAction}</span>
+            </td>
           </tr>
           {errorMessage && (
             <tr>
               <th className="row-index">4</th>
-              <td className="sheet-error" colSpan={4}>{errorMessage}</td>
+              <td className="sheet-error" colSpan={5}>{errorMessage}</td>
             </tr>
           )}
         </tbody>
@@ -79,16 +88,20 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
   );
 }
 
-function pickEtfs(items: QuantEtfDecision[]): QuantEtfDecision[] {
+function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
   return [...items]
     .filter((item) => item.code && item.name)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 4);
+    .slice(0, 5);
 }
 
-function formatEtfs(items: QuantEtfDecision[]): string {
-  if (!items.length) return '暂无强关联 ETF';
-  return items.map((item) => `${item.code} ${item.name}(${roleLabel(item.role)})`).join('；');
+function formatStocks(items: QuantStockDecision[]): string {
+  if (!items.length) return '暂无强关联个股';
+  return items.map((item) => {
+    const change = item.change_pct == null ? '-' : `${item.change_pct.toFixed(2)}%`;
+    const board = item.board_name ? `/${item.board_name}` : '';
+    return `${item.code} ${item.name}${board} ${change} 分${formatScore(item.score)}`;
+  }).join('；');
 }
 
 function capitalStatus(direction?: QuantDirectionDecision): { label: string; kind: string } {
@@ -112,15 +125,18 @@ function confidenceLabel(value: string): string {
   return map[value] ?? value;
 }
 
-function roleLabel(value: string | null): string {
+function actionLabel(value: string | null | undefined): string {
   const map: Record<string, string> = {
-    main: '主',
-    backup: '备',
-    watch: '看',
-    held_position: '持',
-    monitor: '监'
+    WATCH_LOW_BUY: '等低吸',
+    WAIT_PULLBACK: '等回踩',
+    DO_NOT_CHASE: '不追高',
+    OBSERVE_NEXT_DAY: '看次日',
+    VERIFY_ONLY: '只验证',
+    VERIFY_DIRECTION: '验证方向',
+    AVOID: '回避',
+    WATCH: '观察'
   };
-  return value ? map[value] ?? value : '候';
+  return value ? map[value] ?? value : '等待';
 }
 
 function formatMaybeScore(value: number | null | undefined): string {

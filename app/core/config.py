@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     discovery_cache_seconds: int = Field(default=30, ge=5, le=300)
     discovery_min_amount: float = Field(default=50_000_000, ge=1_000_000)
     discovery_max_directions: int = Field(default=8, ge=3, le=20)
+    stock_focus_enabled: bool = True
 
     event_corpus_enabled: bool = True
     event_corpus_source_urls: str = ""

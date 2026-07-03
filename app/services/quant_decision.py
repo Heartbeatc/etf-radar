@@ -8,6 +8,7 @@ from app.domain.models import (
     ActionDecisionResponse,
     MarketDirection,
     MarketFlowResponse,
+    MarketStockCandidate,
     PoolRecommendationItem,
     PoolRecommendationResponse,
     QuantDecisionResponse,
@@ -19,18 +20,20 @@ from app.domain.models import (
 
 def build_quant_decision_report(
     market_flow: MarketFlowResponse,
-    pool: PoolRecommendationResponse,
-    actions: ActionDecisionResponse,
+    pool: PoolRecommendationResponse | None = None,
+    actions: ActionDecisionResponse | None = None,
 ) -> QuantDecisionResponse:
     top_direction = market_flow.directions[0] if market_flow.directions else None
     direction_decision = _direction_decision(top_direction)
-    etfs = _etf_decisions(pool, actions)
+    etfs = _etf_decisions(pool, actions) if pool is not None and actions is not None else []
     stocks = _stock_decisions(top_direction)
-    fixed_actions = [_fixed_action_decision(item) for item in actions.items]
-    conclusion = _conclusion(direction_decision, etfs, fixed_actions)
-    warnings = [*market_flow.warnings[:2], *pool.warnings[:2], *actions.warnings[:2]]
+    fixed_actions = [_fixed_action_decision(item) for item in actions.items] if actions is not None else []
+    conclusion = _conclusion(direction_decision, stocks, fixed_actions)
+    warnings = [*market_flow.warnings[:4]]
     if top_direction and top_direction.state != "confirmed_mainline":
-        warnings.insert(0, "当前方向不是确认主升，操作以等待回踩和验证承接为主。")
+        warnings.insert(0, "当前方向不是确认主升，A股操作以等待回踩和验证承接为主。")
+    if top_direction and not top_direction.linked_stocks:
+        warnings.insert(0, "当前方向缺少强关联A股样本，不能给个股候选动作。")
     return QuantDecisionResponse(
         generated_at=datetime.now(timezone.utc),
         market_status=market_status(),
@@ -41,10 +44,9 @@ def build_quant_decision_report(
         fixed_pool_actions=fixed_actions,
         warnings=_dedupe(warnings)[:8],
         assumptions=[
-            "第一屏只给最终量化结论，其余页面作为证据。",
-            "ETF完整买卖动作覆盖量化候选和用户已登记持仓。",
-            "动态候选ETF只给空仓开仓候选，必须入池或登记持仓后才有完整低吸/止盈/防守线。",
-            "个股目前用于验证方向强弱，不直接输出个股买卖点。",
+            "当前为A股个股聚焦模式：先识别市场资金方向，再筛方向内强关联个股。",
+            "强关联个股来自板块成分股的涨幅、成交额、量比、资金流代理和方向一致性。",
+            "个股候选不是自动买入指令；缺少Level-2、盘口队列和个股多周期K线前，不输出精确买卖价。",
             "主升确认需要至少3个交易日的驻留样本、承接、扩散和反证过滤；单日热点不等于主升。",
         ],
     )
@@ -66,6 +68,7 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
         f"主线概率 {direction.mainline_probability}",
         f"资金驻留 {direction.residency_score}",
         f"承接 {direction.retention_score}",
+        f"强股确认 {direction.factor_scores.get('stock_confirmation', direction.stock_confirmation_score)}",
         f"历史天数 {direction.factor_scores.get('history_days', 0)}",
         f"驻留持续 {direction.factor_scores.get('persistence', 0)}",
         f"脉冲风险 {direction.factor_scores.get('impulse_risk', 0)}",
@@ -90,13 +93,13 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
 
 def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
     if direction.state == "confirmed_mainline" and direction.low_buy_readiness_score >= 65:
-        return "main_up_low_buy", "主升低吸段", "high", "允许围绕量化候选ETF执行低吸计划，不追高。"
+        return "main_up_low_buy", "主升低吸段", "high", "允许围绕强关联A股候选等待低吸确认，不追高。"
     if direction.state == "confirmed_mainline":
-        return "main_up_hold", "主升持有段", "high", "方向处于主升，已有仓位按持有/止盈规则执行，新仓等回踩。"
+        return "main_up_hold", "主升持有段", "high", "方向处于主升，已有个股按趋势持有/止盈规则执行，新仓等回踩。"
     if direction.state == "candidate":
-        return "candidate", "方向候选段", "medium-low", "先验证多日驻留和承接，ETF只等低吸区，不追涨。"
+        return "candidate", "方向候选段", "medium-low", "先验证多日驻留和强股承接，个股只等回踩承接。"
     if direction.state == "hot_today":
-        return "hot_today", "单日爆发段", "medium-low", "观察次日承接，禁止追高。"
+        return "hot_today", "单日爆发段", "medium-low", "观察次日承接，禁止追高个股。"
     if direction.state == "overheated":
         return "overheated", "加速过热段", "medium-low", "不追高，等回落或止盈。"
     if direction.state == "weakening":
@@ -106,6 +109,64 @@ def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
     return "watch", "观察震荡段", "medium-low", "观察，不做主动买入。"
 
 
+def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecision]:
+    if direction is None:
+        return []
+    stocks = direction.linked_stocks[:6]
+    if not stocks and direction.representative_stock:
+        stocks = [direction.representative_stock]
+    result: list[QuantStockDecision] = []
+    for stock in stocks:
+        action, operation, risks = _stock_action(direction, stock)
+        result.append(
+            QuantStockDecision(
+                code=stock.code,
+                name=stock.name,
+                action=action,
+                operation=operation,
+                score=stock.score,
+                direction_label=direction.direction_label,
+                board_name=stock.board_name,
+                verifier_role=stock.verifier_role,
+                price=stock.price,
+                change_pct=stock.change_pct,
+                amount=stock.amount,
+                volume_ratio=stock.volume_ratio,
+                main_net_inflow=stock.main_net_inflow,
+                main_net_inflow_pct=stock.main_net_inflow_pct,
+                source_time=stock.source_time,
+                reasons=(stock.evidence[:5] or ["方向强关联个股"]),
+                risk_flags=_dedupe([*stock.risk_flags[:5], *risks])[:8],
+            )
+        )
+    result.sort(key=lambda item: item.score, reverse=True)
+    return result[:6]
+
+
+def _stock_action(direction: MarketDirection, stock: MarketStockCandidate) -> tuple[str, str, list[str]]:
+    risks: list[str] = []
+    change = stock.change_pct if stock.change_pct is not None else 0.0
+    inflow_pct = stock.main_net_inflow_pct if stock.main_net_inflow_pct is not None else 0.0
+    if direction.state in {"weakening", "weak_direction"}:
+        return "AVOID", "方向弱化或无主线，不做个股开仓。", ["方向阶段不支持个股参与"]
+    if change >= 9:
+        return "DO_NOT_CHASE", "强关联个股已明显加速，只看承接，不追涨。", ["接近涨停或短线加速"]
+    if change >= 6:
+        return "WAIT_PULLBACK", "个股偏热，等回踩后仍有资金承接再观察。", ["短线涨幅偏高"]
+    if inflow_pct < -5:
+        return "VERIFY_ONLY", "个股资金流代理偏弱，只能验证方向，暂不作为低吸候选。", ["个股主力资金代理为净流出"]
+    if direction.state == "confirmed_mainline" and stock.score >= 72 and direction.low_buy_readiness_score >= 60:
+        return "WATCH_LOW_BUY", "主线内强关联个股，等待回踩不破分时均价/关键均线并重新放量承接。", []
+    if direction.state == "candidate" and stock.score >= 68:
+        return "WATCH_LOW_BUY", "方向候选内强股，等次日/回踩承接确认；未确认前不主动追。", ["方向仍是候选段"]
+    if direction.state == "hot_today":
+        return "OBSERVE_NEXT_DAY", "单日热点个股，至少等下一交易日承接确认。", ["单日热点不能确认资金驻留"]
+    if stock.score >= 65:
+        return "VERIFY_DIRECTION", "作为方向强弱验证股，等待更明确阶段。", []
+    return "WATCH", "关联度一般，只观察不操作。", ["个股强度不足"]
+
+
+# ETF path is kept only for legacy API compatibility. The main web page no longer displays it.
 def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResponse) -> list[QuantEtfDecision]:
     action_by_code = {item.code: item for item in actions.items}
     selected = [item for item in pool.items if item.recommended_role in {"main", "backup"}]
@@ -122,29 +183,18 @@ def _etf_decisions(pool: PoolRecommendationResponse, actions: ActionDecisionResp
 
 
 def _pool_candidate_decision(item: PoolRecommendationItem) -> QuantEtfDecision:
-    suggested_position_pct = None
-    operation = "空仓候选：等待低吸区、防守线和承接信号同时满足后再决定。"
-    if item.recommended_role is None:
-        operation = "强关联观察ETF：方向或低吸闸门未通过，只看不买。"
-    elif item.direction_state == "confirmed_mainline" and item.low_buy_readiness_score and item.low_buy_readiness_score >= 65:
-        suggested_position_pct = 20
-        operation = "空仓开仓候选；入池后等待低吸触发，首仓上限20%，未触发不买。"
-    elif item.direction_state == "candidate":
-        operation = "方向候选载体，先等回踩和多日承接；未确认前不追。"
-    elif item.direction_state == "hot_today":
-        operation = "单日热点关联ETF，等待次日承接，不作为开仓信号。"
     return QuantEtfDecision(
         code=item.code,
         name=item.name,
         role=item.recommended_role,
         action=item.action,
-        operation=operation,
+        operation="ETF路径已降为兼容输出；当前主页面以A股个股候选为准。",
         score=item.score,
         direction_label=item.direction_label,
         price=item.price,
-        suggested_position_pct=suggested_position_pct,
+        suggested_position_pct=None,
         reasons=item.reasons[:6],
-        risk_flags=item.risk_flags[:6] + ["未进入量化候选或持仓监控，暂无完整买卖点"],
+        risk_flags=item.risk_flags[:6],
     )
 
 
@@ -190,44 +240,20 @@ def _fixed_operation(item: ActionDecisionItem) -> str:
     return mapping.get(item.action, item.action)
 
 
-def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecision]:
-    if direction is None:
-        return []
-    stocks = direction.linked_stocks[:3]
-    if not stocks and direction.representative_stock:
-        stocks = [direction.representative_stock]
-    result: list[QuantStockDecision] = []
-    for stock in stocks:
-        result.append(
-            QuantStockDecision(
-                code=stock.code,
-                name=stock.name,
-                action="VERIFY_DIRECTION",
-                operation="作为强股验证方向，不直接给个股买卖点。",
-                score=stock.score,
-                direction_label=direction.direction_label,
-                change_pct=stock.change_pct,
-                reasons=stock.evidence[:5] or ["方向代表股"],
-                risk_flags=stock.risk_flags[:5],
-            )
-        )
-    return result
-
-
-def _conclusion(direction: QuantDirectionDecision, etfs: list[QuantEtfDecision], fixed_actions: list[QuantEtfDecision]) -> str:
-    buy = [item for item in fixed_actions if item.action == "BUY_FIRST_BATCH"]
+def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecision], fixed_actions: list[QuantEtfDecision]) -> str:
     sell = [item for item in fixed_actions if item.action.startswith("SELL") or item.action == "REDUCE_OR_HOLD_TIGHT"]
-    holding = [item for item in fixed_actions if item.has_position]
-    candidate_open = [item for item in etfs if item.suggested_position_pct]
+    low_buy = [item for item in stocks if item.action == "WATCH_LOW_BUY"]
+    hot = [item for item in stocks if item.action in {"WAIT_PULLBACK", "DO_NOT_CHASE", "OBSERVE_NEXT_DAY"}]
     if sell:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前优先处理卖出/减仓信号。"
-    if holding:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓按持有/止盈/防守线跟踪。"
-    if buy:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；量化候选出现可执行低吸。"
-    if candidate_open:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；空仓只等候选ETF入池后的低吸触发。"
-    return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前不追高，以等待和验证为主。"
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有持仓优先按卖出/减仓信号处理。"
+    if low_buy:
+        names = "、".join(f"{item.name}({item.code})" for item in low_buy[:3])
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；A股候选为 {names}，只等回踩承接，不追高。"
+    if hot:
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；强关联个股偏热或需次日承接，当前不追。"
+    if stocks:
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有强关联个股样本，但当前只观察验证。"
+    return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前没有可用A股候选。"
 
 
 def _dedupe(values: list[str]) -> list[str]:

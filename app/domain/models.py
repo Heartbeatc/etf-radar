@@ -438,6 +438,8 @@ class MarketDirection(BaseModel):
     residency_score: int = 0
     retention_score: int = 0
     etf_confirmation_score: int = 0
+    stock_confirmation_score: int = 0
+    carrier_confirmation_score: int = 0
     low_buy_readiness_score: int = 0
     capital_status: str = "unknown"
     trade_action: str = "wait"
@@ -575,7 +577,15 @@ class QuantStockDecision(BaseModel):
     operation: str
     score: int
     direction_label: str | None = None
+    board_name: str | None = None
+    verifier_role: str | None = None
+    price: float | None = None
     change_pct: float | None = None
+    amount: float | None = None
+    volume_ratio: float | None = None
+    main_net_inflow: float | None = None
+    main_net_inflow_pct: float | None = None
+    source_time: datetime | None = None
     reasons: list[str]
     risk_flags: list[str]
 

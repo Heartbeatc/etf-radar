@@ -140,11 +140,11 @@ async def build_market_flow_report(
         directions=directions[:max_directions],
         warnings=warnings,
         assumptions=[
-            "资金流向先从行业/概念板块识别，不从 ETF 名称倒推。",
+            "资金流向先从行业/概念板块识别，再用强关联A股个股验证承接。",
             "强势个股只用于验证方向强度，不等于个股买入建议。",
-            "确认主线需要至少3个交易日的历史驻留、方向内扩散、代表股承接和ETF载体确认。",
+            "确认主线需要至少3个交易日的历史驻留、方向内扩散、代表股承接和反证过滤。",
             "单日成交额、量比、涨幅只能证明异动强度，不能单独证明主力资金驻留。",
-            "免费源适合研究预警，不适合作为交易所级执行依据。",
+            "免费源适合研究预警；个股买卖前仍需用更高质量行情和风控确认。",
         ],
     )
 
@@ -359,7 +359,7 @@ def _directions_from_boards(
         )
         score = factor_scores["mainline_probability"]
         state = _quant_direction_state(factor_scores, inflow)
-        evidence = _direction_evidence(items, breadth, inflow, linked_etfs, event_signal)
+        evidence = _direction_evidence(items, breadth, inflow, linked_etfs, linked_stocks, event_signal)
         evidence.extend(_quant_evidence(factor_scores, concentration_pct, state))
         risk_flags = _direction_risks(items, breadth, inflow)
         if event_signal is not None and event_signal.score >= 55 and state in {"hot_today", "watch_direction", "weak_direction"}:
@@ -390,6 +390,8 @@ def _directions_from_boards(
                 residency_score=factor_scores["residency"],
                 retention_score=factor_scores["retention"],
                 etf_confirmation_score=factor_scores["etf_confirmation"],
+                stock_confirmation_score=factor_scores["stock_confirmation"],
+                carrier_confirmation_score=factor_scores["carrier_confirmation"],
                 low_buy_readiness_score=factor_scores["low_buy_readiness"],
                 capital_status=_capital_status(state),
                 trade_action=trade_action,
@@ -663,6 +665,8 @@ def _direction_factor_scores(
     leadership = _clamp(stock_score * 0.6 + board_score * 0.4)
 
     etf_confirmation = _etf_confirmation_score(linked_etfs)
+    stock_confirmation = _stock_confirmation_score(linked_stocks)
+    carrier_confirmation = max(etf_confirmation, stock_confirmation)
     event_score = event_signal.score if event_signal is not None else 0
     event_count = event_signal.event_count if event_signal is not None else 0
     intraday_strength = _clamp(
@@ -680,10 +684,10 @@ def _direction_factor_scores(
         + flow_proxy * 0.20
         + relative_strength * 0.16
         + expansion * 0.18
-        + etf_confirmation * 0.12
+        + carrier_confirmation * 0.12
         + leadership * 0.10
     )
-    # Free data has no identity for a fund and no guaranteed multi-day order-flow history.
+    # Free data has no identity for capital owners and no guaranteed multi-day order-flow history.
     # Keep residency conservative until persisted multi-day snapshots or paid L2 are available.
     if strong_boards >= 3 and inflow > 0 and (breadth is None or breadth >= 55):
         residency += 5
@@ -692,7 +696,7 @@ def _direction_factor_scores(
     else:
         residency = min(residency, 74)
 
-    retention = _clamp(breadth_score * 0.28 + leadership * 0.24 + flow_proxy * 0.20 + volume_expansion * 0.14 + etf_confirmation * 0.14)
+    retention = _clamp(breadth_score * 0.28 + leadership * 0.24 + flow_proxy * 0.20 + volume_expansion * 0.14 + carrier_confirmation * 0.14)
     persistence = _persistence_score(history_stats)
     impulse_risk = _impulse_risk(
         volume_expansion=volume_expansion,
@@ -700,7 +704,7 @@ def _direction_factor_scores(
         flow_proxy=flow_proxy,
         breadth_score=breadth_score,
         leadership=leadership,
-        etf_confirmation=etf_confirmation,
+        etf_confirmation=carrier_confirmation,
         retention=retention,
         history_days=history_stats.days_count,
     )
@@ -711,12 +715,12 @@ def _direction_factor_scores(
         history_days=history_stats.days_count,
         event_score=event_score,
     )
-    low_buy_readiness = _low_buy_readiness(linked_etfs, relative_strength, breadth_score, flow_proxy)
+    low_buy_readiness = _low_buy_readiness(linked_etfs, linked_stocks, relative_strength, breadth_score, flow_proxy)
     raw_probability = _clamp(
         residency * 0.24
         + retention * 0.20
         + intraday_strength * 0.16
-        + etf_confirmation * 0.08
+        + carrier_confirmation * 0.08
         + persistence * 0.22
         + evidence_quality * 0.08
         + event_score * 0.02
@@ -746,6 +750,8 @@ def _direction_factor_scores(
         "expansion": expansion,
         "leadership": leadership,
         "etf_confirmation": etf_confirmation,
+        "stock_confirmation": stock_confirmation,
+        "carrier_confirmation": carrier_confirmation,
         "intraday_strength": intraday_strength,
         "residency": _clamp(residency),
         "retention": retention,
@@ -778,10 +784,45 @@ def _etf_confirmation_score(etfs: list[DiscoveryEtfCandidate]) -> int:
     return _clamp(score)
 
 
-def _low_buy_readiness(etfs: list[DiscoveryEtfCandidate], relative_strength: int, breadth_score: int, flow_proxy: int) -> int:
-    if not etfs:
+def _stock_confirmation_score(stocks: list[MarketStockCandidate]) -> int:
+    if not stocks:
         return 35
-    entry_scores = []
+    top = stocks[0]
+    score = 34 + top.score * 0.46
+    if len(stocks) >= 2:
+        score += 8
+    if len(stocks) >= 3:
+        score += 5
+    if any(stock.verifier_role == "expansion" for stock in stocks[1:4]):
+        score += 5
+    if top.main_net_inflow_pct is not None:
+        if top.main_net_inflow_pct >= 5:
+            score += 8
+        elif top.main_net_inflow_pct < -5:
+            score -= 12
+    if top.change_pct is not None:
+        if 1 <= top.change_pct <= 6:
+            score += 6
+        elif top.change_pct >= 9:
+            score -= 4
+        elif top.change_pct < -2:
+            score -= 10
+    if top.volume_ratio is not None:
+        if 1.0 <= top.volume_ratio <= 2.5:
+            score += 5
+        elif top.volume_ratio > 4:
+            score -= 5
+    return _clamp(score)
+
+
+def _low_buy_readiness(
+    etfs: list[DiscoveryEtfCandidate],
+    stocks: list[MarketStockCandidate],
+    relative_strength: int,
+    breadth_score: int,
+    flow_proxy: int,
+) -> int:
+    entry_scores: list[int] = []
     for item in etfs[:3]:
         if item.entry_bias == "pullback_watch":
             entry_scores.append(78)
@@ -793,7 +834,23 @@ def _low_buy_readiness(etfs: list[DiscoveryEtfCandidate], relative_strength: int
             entry_scores.append(25)
         else:
             entry_scores.append(50)
-    entry = max(entry_scores) if entry_scores else 45
+    for stock in stocks[:5]:
+        change = stock.change_pct if stock.change_pct is not None else 0.0
+        if -1 <= change <= 3:
+            entry_scores.append(74)
+        elif 3 < change <= 6:
+            entry_scores.append(58)
+        elif 6 < change < 9:
+            entry_scores.append(42)
+        elif change >= 9:
+            entry_scores.append(28)
+        elif change < -3:
+            entry_scores.append(38)
+        else:
+            entry_scores.append(52)
+    if not entry_scores:
+        return 35
+    entry = max(entry_scores)
     return _clamp(entry * 0.44 + flow_proxy * 0.22 + breadth_score * 0.18 + min(relative_strength, 70) * 0.16)
 
 
@@ -831,7 +888,7 @@ def _apply_probability_evidence_cap(
         cap = min(cap, 58)
     if evidence_quality < 55:
         cap = min(cap, 60)
-    if not linked_etfs:
+    if not linked_etfs and not linked_stocks:
         cap = min(cap, 62)
     if not linked_stocks:
         cap = min(cap, 66)
@@ -917,8 +974,10 @@ def _quant_evidence(factors: dict[str, int], concentration_pct: float | None, st
         evidence.append("历史方向驻留样本通过初步验证")
     elif factors.get("history_days", 0) < 3:
         evidence.append("历史驻留样本不足3个交易日，不能确认主线")
-    if factors["etf_confirmation"] >= 65:
-        evidence.append("ETF载体对方向形成确认")
+    if factors.get("stock_confirmation", 0) >= 65:
+        evidence.append("强关联A股个股对方向形成承接确认")
+    elif factors.get("etf_confirmation", 0) >= 65:
+        evidence.append("ETF载体对方向形成辅助确认")
     if state == "hot_today":
         evidence.append("先判定为当日热点，确认主线前需要次日承接")
     return evidence
@@ -938,6 +997,8 @@ def _quant_risks(factors: dict[str, int], state: str, etfs: list[DiscoveryEtfCan
         risks.append("单日强度不足以证明资金驻留")
     if factors["flow_proxy"] < 45:
         risks.append("资金流代理分偏弱或为负")
+    if factors.get("stock_confirmation", 0) < 55:
+        risks.append("强关联个股承接验证不足")
     if any(item.entry_bias == "avoid_premium" for item in etfs[:2]):
         risks.append("一个或多个ETF载体存在溢价风险")
     return risks
@@ -980,6 +1041,7 @@ def _direction_evidence(
     breadth: float | None,
     inflow: float,
     etfs: list[DiscoveryEtfCandidate],
+    stocks: list[MarketStockCandidate],
     event_signal: DirectionEventSignal | None = None,
 ) -> list[str]:
     evidence: list[str] = []
@@ -991,8 +1053,10 @@ def _direction_evidence(
         evidence.append("板块层面估算主力资金为净流入")
     if sum(item.amount or 0 for item in items[:3]) >= 5_000_000_000:
         evidence.append("前排板块成交容量足够")
+    if stocks:
+        evidence.append("该方向存在强关联A股个股样本")
     if etfs:
-        evidence.append("该方向存在可交易ETF载体")
+        evidence.append("该方向存在ETF辅助观察载体")
     if event_signal is not None and event_signal.score >= 45:
         evidence.append(f"公开事件催化分 {event_signal.score}，事件数 {event_signal.event_count}")
     return evidence[:8]

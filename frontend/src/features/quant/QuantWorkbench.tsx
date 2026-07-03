@@ -53,7 +53,7 @@ export function QuantWorkbench({ decision, onRefresh, refreshing, onLogout, erro
             <td>最近方向</td>
             <td>主力在不在</td>
             <td>目前阶段</td>
-            <td>强关联个股</td>
+            <td>龙头/二龙头</td>
             <td>动作</td>
           </tr>
           <tr>
@@ -96,12 +96,21 @@ function pickStocks(items: QuantStockDecision[]): QuantStockDecision[] {
 }
 
 function formatStocks(items: QuantStockDecision[]): string {
-  if (!items.length) return '暂无强关联个股';
+  if (!items.length) return '暂无龙头/二龙头样本';
   return items.map((item) => {
     const change = item.change_pct == null ? '-' : `${item.change_pct.toFixed(2)}%`;
     const board = item.board_name ? `/${item.board_name}` : '';
-    return `${item.code} ${item.name}${board} ${change} 分${formatScore(item.score)}`;
+    return `${stockRoleLabel(item.verifier_role)} ${item.code} ${item.name}${board} ${change} 分${formatScore(item.score)}`;
   }).join('；');
+}
+
+function stockRoleLabel(value: string | null | undefined): string {
+  const map: Record<string, string> = {
+    leader: '龙头',
+    second_leader: '二龙',
+    expansion: '扩散'
+  };
+  return value ? map[value] ?? value : '候选';
 }
 
 function capitalStatus(direction?: QuantDirectionDecision): { label: string; kind: string } {

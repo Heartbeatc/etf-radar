@@ -33,7 +33,7 @@ def build_quant_decision_report(
     if top_direction and top_direction.state != "confirmed_mainline":
         warnings.insert(0, "当前方向不是确认主升，A股操作以等待回踩和验证承接为主。")
     if top_direction and not top_direction.linked_stocks:
-        warnings.insert(0, "当前方向缺少强关联A股样本，不能给个股候选动作。")
+        warnings.insert(0, "当前方向缺少龙头/二龙头样本，不能给个股候选动作。")
     return QuantDecisionResponse(
         generated_at=datetime.now(timezone.utc),
         market_status=market_status(),
@@ -44,8 +44,8 @@ def build_quant_decision_report(
         fixed_pool_actions=fixed_actions,
         warnings=_dedupe(warnings)[:8],
         assumptions=[
-            "当前为A股个股聚焦模式：先识别市场资金方向，再筛方向内强关联个股。",
-            "强关联个股来自板块成分股的涨幅、成交额、量比、资金流代理和方向一致性。",
+            "当前为A股个股聚焦模式：先识别市场资金方向，再筛方向内龙头、二龙头和扩散股。",
+            "龙头/二龙头来自方向内成分股的涨幅、成交额、量比、资金流代理和带动性排序。",
             "个股候选不是自动买入指令；缺少Level-2、盘口队列和个股多周期K线前，不输出精确买卖价。",
             "主升确认需要至少3个交易日的驻留样本、承接、扩散和反证过滤；单日热点不等于主升。",
         ],
@@ -93,11 +93,11 @@ def _direction_decision(direction: MarketDirection | None) -> QuantDirectionDeci
 
 def _phase(direction: MarketDirection) -> tuple[str, str, str, str]:
     if direction.state == "confirmed_mainline" and direction.low_buy_readiness_score >= 65:
-        return "main_up_low_buy", "主升低吸段", "high", "允许围绕强关联A股候选等待低吸确认，不追高。"
+        return "main_up_low_buy", "主升低吸段", "high", "允许围绕方向龙头/二龙头等待低吸确认，不追高。"
     if direction.state == "confirmed_mainline":
         return "main_up_hold", "主升持有段", "high", "方向处于主升，已有个股按趋势持有/止盈规则执行，新仓等回踩。"
     if direction.state == "candidate":
-        return "candidate", "方向候选段", "medium-low", "先验证多日驻留和强股承接，个股只等回踩承接。"
+        return "candidate", "方向候选段", "medium-low", "先验证多日驻留以及龙头/二龙头承接，个股只等回踩承接。"
     if direction.state == "hot_today":
         return "hot_today", "单日爆发段", "medium-low", "观察次日承接，禁止追高个股。"
     if direction.state == "overheated":
@@ -135,7 +135,7 @@ def _stock_decisions(direction: MarketDirection | None) -> list[QuantStockDecisi
                 main_net_inflow=stock.main_net_inflow,
                 main_net_inflow_pct=stock.main_net_inflow_pct,
                 source_time=stock.source_time,
-                reasons=(stock.evidence[:5] or ["方向强关联个股"]),
+                reasons=(stock.evidence[:5] or ["方向龙头/二龙头候选"]),
                 risk_flags=_dedupe([*stock.risk_flags[:5], *risks])[:8],
             )
         )
@@ -150,15 +150,15 @@ def _stock_action(direction: MarketDirection, stock: MarketStockCandidate) -> tu
     if direction.state in {"weakening", "weak_direction"}:
         return "AVOID", "方向弱化或无主线，不做个股开仓。", ["方向阶段不支持个股参与"]
     if change >= 9:
-        return "DO_NOT_CHASE", "强关联个股已明显加速，只看承接，不追涨。", ["接近涨停或短线加速"]
+        return "DO_NOT_CHASE", "方向龙头/二龙头已明显加速，只看承接，不追涨。", ["接近涨停或短线加速"]
     if change >= 6:
         return "WAIT_PULLBACK", "个股偏热，等回踩后仍有资金承接再观察。", ["短线涨幅偏高"]
     if inflow_pct < -5:
         return "VERIFY_ONLY", "个股资金流代理偏弱，只能验证方向，暂不作为低吸候选。", ["个股主力资金代理为净流出"]
     if direction.state == "confirmed_mainline" and stock.score >= 72 and direction.low_buy_readiness_score >= 60:
-        return "WATCH_LOW_BUY", "主线内强关联个股，等待回踩不破分时均价/关键均线并重新放量承接。", []
+        return "WATCH_LOW_BUY", "主线内龙头/二龙头，等待回踩不破分时均价/关键均线并重新放量承接。", []
     if direction.state == "candidate" and stock.score >= 68:
-        return "WATCH_LOW_BUY", "方向候选内强股，等次日/回踩承接确认；未确认前不主动追。", ["方向仍是候选段"]
+        return "WATCH_LOW_BUY", "方向候选内龙头/二龙头，等次日/回踩承接确认；未确认前不主动追。", ["方向仍是候选段"]
     if direction.state == "hot_today":
         return "OBSERVE_NEXT_DAY", "单日热点个股，至少等下一交易日承接确认。", ["单日热点不能确认资金驻留"]
     if stock.score >= 65:
@@ -250,9 +250,9 @@ def _conclusion(direction: QuantDirectionDecision, stocks: list[QuantStockDecisi
         names = "、".join(f"{item.name}({item.code})" for item in low_buy[:3])
         return f"{direction.direction_label or '市场'}处于{direction.phase_label}；A股候选为 {names}，只等回踩承接，不追高。"
     if hot:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；强关联个股偏热或需次日承接，当前不追。"
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；方向龙头/二龙头偏热或需次日承接，当前不追。"
     if stocks:
-        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有强关联个股样本，但当前只观察验证。"
+        return f"{direction.direction_label or '市场'}处于{direction.phase_label}；已有龙头/二龙头样本，但当前只观察验证。"
     return f"{direction.direction_label or '市场'}处于{direction.phase_label}；当前没有可用A股候选。"
 
 

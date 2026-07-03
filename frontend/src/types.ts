@@ -192,6 +192,7 @@ export interface MarketBoardCandidate {
   leader_name: string | null;
   leader_change_pct: number | null;
   representative_stock: MarketStockCandidate | null;
+  top_stocks: MarketStockCandidate[];
   evidence: string[];
   risk_flags: string[];
   source_time: string | null;

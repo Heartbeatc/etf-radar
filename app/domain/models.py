@@ -410,6 +410,7 @@ class MarketBoardCandidate(BaseModel):
     leader_name: str | None = None
     leader_change_pct: float | None = None
     representative_stock: MarketStockCandidate | None = None
+    top_stocks: list[MarketStockCandidate] = Field(default_factory=list)
     evidence: list[str]
     risk_flags: list[str]
     source_time: datetime | None = None

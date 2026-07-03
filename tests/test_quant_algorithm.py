@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
 from app.core.config import Settings
-from app.domain.models import DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, PoolRecommendationResponse
+from app.domain.models import DiscoveryEtfCandidate, MarketDirection, MarketFlowResponse, MarketStockCandidate, PoolRecommendationResponse
 from app.services.market_flow import _apply_probability_evidence_cap
 from app.services.pool_recommendation import build_pool_recommendation_report
-from app.services.quant_decision import _etf_decisions
+from app.services.quant_decision import _etf_decisions, build_quant_decision_report
 
 
 def etf(code: str, name: str, *, score: int = 76, mapping_score: int = 76, premium_pct: float = 0.2, amount: float = 300_000_000) -> DiscoveryEtfCandidate:
@@ -26,7 +26,33 @@ def etf(code: str, name: str, *, score: int = 76, mapping_score: int = 76, premi
     )
 
 
-def direction(state: str, linked_etfs: list[DiscoveryEtfCandidate], *, probability: int = 82, low_buy: int = 68) -> MarketDirection:
+def stock(code: str, name: str, *, role: str, score: int = 80, change_pct: float = 3.0) -> MarketStockCandidate:
+    return MarketStockCandidate(
+        code=code,
+        name=name,
+        board_code="BK-test",
+        board_name="机器人",
+        price=20.0,
+        change_pct=change_pct,
+        amount=600_000_000,
+        volume_ratio=1.5,
+        main_net_inflow_pct=4.0,
+        score=score,
+        verifier_role=role,
+        evidence=["test"],
+        risk_flags=[],
+    )
+
+
+def direction(
+    state: str,
+    linked_etfs: list[DiscoveryEtfCandidate],
+    *,
+    probability: int = 82,
+    low_buy: int = 68,
+    linked_stocks: list[MarketStockCandidate] | None = None,
+) -> MarketDirection:
+    linked_stocks = linked_stocks or []
     return MarketDirection(
         direction_key="robotics_highend",
         direction_label="机器人/高端制造",
@@ -38,6 +64,8 @@ def direction(state: str, linked_etfs: list[DiscoveryEtfCandidate], *, probabili
         main_net_inflow=1_200_000_000,
         avg_change_pct=3.2,
         breadth_pct=66,
+        representative_stock=linked_stocks[0] if linked_stocks else None,
+        linked_stocks=linked_stocks,
         linked_etfs=linked_etfs,
         main_etfs=linked_etfs[:2],
         backup_etf=linked_etfs[2] if len(linked_etfs) > 2 else None,
@@ -120,7 +148,7 @@ def test_decision_keeps_strong_related_etfs_as_observation_when_not_promoted():
 
     assert decisions
     assert decisions[0].role is None
-    assert "只看不买" in decisions[0].operation
+    assert "ETF路径已降为兼容输出" in decisions[0].operation
 
 
 def test_a_share_direction_penalizes_cross_border_carrier():
@@ -132,3 +160,17 @@ def test_a_share_direction_penalizes_cross_border_carrier():
 
     assert by_code["513000"].score < by_code["159770"].score
     assert "159770" in report.recommended_main_codes
+
+
+def test_quant_decision_outputs_leader_and_second_leader_not_etfs():
+    leaders = [
+        stock("688017", "绿的谐波", role="leader", score=90, change_pct=4.2),
+        stock("002747", "埃斯顿", role="second_leader", score=84, change_pct=2.8),
+        stock("002050", "三花智控", role="expansion", score=77, change_pct=1.8),
+    ]
+    report = build_quant_decision_report(flow_report([direction("candidate", [], probability=66, low_buy=58, linked_stocks=leaders)]))
+
+    assert report.etfs == []
+    assert [item.verifier_role for item in report.stocks[:2]] == ["leader", "second_leader"]
+    assert report.stocks[0].code == "688017"
+    assert any("龙头" in item and "二龙头" in item for item in report.assumptions)

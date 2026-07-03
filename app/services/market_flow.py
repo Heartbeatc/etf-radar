@@ -164,9 +164,10 @@ async def _attach_representative_stocks(
             async with semaphore:
                 rows = await client.fetch_board_members(board.code)
             sample_count += len(rows)
-            stock = _best_stock(board, rows)
-            if stock is not None:
-                board.representative_stock = stock
+            stocks = _rank_board_stocks(board, rows)
+            if stocks:
+                board.top_stocks = stocks[:6]
+                board.representative_stock = board.top_stocks[0]
         except Exception as exc:
             board.risk_flags.append(f"成分股抓取失败：{str(exc)[:80]}")
 
@@ -205,13 +206,29 @@ def _representative_board_targets(boards: list[MarketBoardCandidate], limit: int
     return targets
 
 
-def _best_stock(board: MarketBoardCandidate, rows: list[dict[str, Any]]) -> MarketStockCandidate | None:
+def _rank_board_stocks(board: MarketBoardCandidate, rows: list[dict[str, Any]]) -> list[MarketStockCandidate]:
     candidates = [_stock_candidate(board, row) for row in rows]
     candidates = [item for item in candidates if item is not None]
     if not candidates:
-        return _leader_stock(board)
-    candidates.sort(key=lambda item: item.score, reverse=True)
-    return candidates[0]
+        fallback = _leader_stock(board)
+        return [fallback] if fallback is not None else []
+    candidates.sort(key=lambda item: (item.score, item.amount or 0), reverse=True)
+    for idx, stock in enumerate(candidates[:6]):
+        if idx == 0:
+            stock.verifier_role = "leader"
+            stock.evidence = _prepend_unique(stock.evidence, "板块龙头候选")
+        elif idx == 1:
+            stock.verifier_role = "second_leader"
+            stock.evidence = _prepend_unique(stock.evidence, "板块二龙头候选")
+        else:
+            stock.verifier_role = "expansion"
+            stock.evidence = _prepend_unique(stock.evidence, "板块扩散股候选")
+    return candidates[:6]
+
+
+def _best_stock(board: MarketBoardCandidate, rows: list[dict[str, Any]]) -> MarketStockCandidate | None:
+    stocks = _rank_board_stocks(board, rows)
+    return stocks[0] if stocks else None
 
 
 def _leader_stock(board: MarketBoardCandidate) -> MarketStockCandidate | None:
@@ -487,19 +504,52 @@ def _is_cross_border_etf(name: str) -> bool:
 
 
 def _direction_stocks(items: list[MarketBoardCandidate]) -> list[MarketStockCandidate]:
-    by_code: dict[str, MarketStockCandidate] = {}
+    by_code: dict[str, tuple[int, MarketStockCandidate]] = {}
     for item in items:
-        if item.representative_stock is None:
-            continue
-        stock = item.representative_stock.model_copy(deep=True)
-        existing = by_code.get(stock.code)
-        if existing is None or stock.score > existing.score:
-            by_code[stock.code] = stock
-    stocks = list(by_code.values())
-    stocks.sort(key=lambda item: item.score, reverse=True)
+        source_stocks = item.top_stocks or ([item.representative_stock] if item.representative_stock is not None else [])
+        for source in source_stocks:
+            stock = source.model_copy(deep=True)
+            rank_score = _clamp(stock.score + _board_stock_context_bonus(item, stock))
+            existing = by_code.get(stock.code)
+            if existing is None or rank_score > existing[0]:
+                by_code[stock.code] = (rank_score, stock)
+    ranked = list(by_code.values())
+    ranked.sort(key=lambda item: (item[0], item[1].amount or 0), reverse=True)
+    stocks = [stock for _, stock in ranked]
     for idx, stock in enumerate(stocks):
-        stock.verifier_role = "leader" if idx == 0 else "expansion"
+        if idx == 0:
+            stock.verifier_role = "leader"
+            stock.evidence = _prepend_unique(stock.evidence, "方向龙头候选")
+        elif idx == 1:
+            stock.verifier_role = "second_leader"
+            stock.evidence = _prepend_unique(stock.evidence, "方向二龙头候选")
+        else:
+            stock.verifier_role = "expansion"
+            stock.evidence = _prepend_unique(stock.evidence, "方向扩散股候选")
     return stocks
+
+
+def _board_stock_context_bonus(board: MarketBoardCandidate, stock: MarketStockCandidate) -> int:
+    bonus = 0
+    if board.score >= 75:
+        bonus += 4
+    elif board.score >= 65:
+        bonus += 2
+    if (board.amount or 0) >= 5_000_000_000:
+        bonus += 3
+    elif (board.amount or 0) >= 2_000_000_000:
+        bonus += 2
+    if board.breadth_pct is not None and board.breadth_pct >= 60:
+        bonus += 2
+    if stock.verifier_role == "leader":
+        bonus += 3
+    elif stock.verifier_role == "second_leader":
+        bonus += 2
+    return bonus
+
+
+def _prepend_unique(values: list[str], value: str) -> list[str]:
+    return [value, *[item for item in values if item != value]][:8]
 
 
 def _history_by_direction(history: list[MarketFlowResponse]) -> dict[str, DirectionHistoryStats]:
@@ -791,9 +841,11 @@ def _stock_confirmation_score(stocks: list[MarketStockCandidate]) -> int:
     score = 34 + top.score * 0.46
     if len(stocks) >= 2:
         score += 8
+        if stocks[1].verifier_role == "second_leader":
+            score += 6
     if len(stocks) >= 3:
         score += 5
-    if any(stock.verifier_role == "expansion" for stock in stocks[1:4]):
+    if any(stock.verifier_role in {"second_leader", "expansion"} for stock in stocks[1:5]):
         score += 5
     if top.main_net_inflow_pct is not None:
         if top.main_net_inflow_pct >= 5:
@@ -975,7 +1027,7 @@ def _quant_evidence(factors: dict[str, int], concentration_pct: float | None, st
     elif factors.get("history_days", 0) < 3:
         evidence.append("历史驻留样本不足3个交易日，不能确认主线")
     if factors.get("stock_confirmation", 0) >= 65:
-        evidence.append("强关联A股个股对方向形成承接确认")
+        evidence.append("方向龙头/二龙头对方向形成承接确认")
     elif factors.get("etf_confirmation", 0) >= 65:
         evidence.append("ETF载体对方向形成辅助确认")
     if state == "hot_today":
@@ -998,7 +1050,7 @@ def _quant_risks(factors: dict[str, int], state: str, etfs: list[DiscoveryEtfCan
     if factors["flow_proxy"] < 45:
         risks.append("资金流代理分偏弱或为负")
     if factors.get("stock_confirmation", 0) < 55:
-        risks.append("强关联个股承接验证不足")
+        risks.append("方向龙头/二龙头承接验证不足")
     if any(item.entry_bias == "avoid_premium" for item in etfs[:2]):
         risks.append("一个或多个ETF载体存在溢价风险")
     return risks
@@ -1054,7 +1106,7 @@ def _direction_evidence(
     if sum(item.amount or 0 for item in items[:3]) >= 5_000_000_000:
         evidence.append("前排板块成交容量足够")
     if stocks:
-        evidence.append("该方向存在强关联A股个股样本")
+        evidence.append("该方向存在龙头/二龙头候选样本")
     if etfs:
         evidence.append("该方向存在ETF辅助观察载体")
     if event_signal is not None and event_signal.score >= 45:
